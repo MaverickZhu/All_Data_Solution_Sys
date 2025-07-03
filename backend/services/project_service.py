@@ -4,9 +4,10 @@
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from models.project import Project, ProjectCreate, ProjectUpdate
-from models.user import User
-from core.exceptions import NotFoundException, AuthorizationException
+
+from backend.models.project import Project, ProjectCreate, ProjectUpdate
+from backend.models.user import User
+from backend.core.exceptions import NotFoundException, AuthorizationException
 from datetime import datetime
 
 class ProjectService:

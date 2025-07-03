@@ -2,21 +2,23 @@
 数据源管理API端点
 """
 from typing import List
-from fastapi import APIRouter, Depends, UploadFile, File, status
+from fastapi import APIRouter, Depends, UploadFile, File, status, Form, HTTPException
+from sqlalchemy.orm import Session
+import os
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_db
-from core.security import get_current_active_user
-from models.user import User
-from models.data_source import DataSourceResponse
-from services.project_service import ProjectService
-from services.data_source_service import DataSourceService
+from backend.core.database import get_db
+from backend.core.security import get_current_active_user
+from backend.models.user import User
+from backend.models.data_source import DataSourceResponse, DataSourceCreate
+from backend.services.project_service import ProjectService
+from backend.services.data_source_service import DataSourceService
 
 router = APIRouter()
 
 @router.post(
-    "/projects/{project_id}/datasources/upload", 
+    "/upload", 
     response_model=DataSourceResponse,
     status_code=status.HTTP_201_CREATED
 )
@@ -36,7 +38,7 @@ async def upload_data_source(
 
 
 @router.get(
-    "/projects/{project_id}/datasources", 
+    "/", 
     response_model=List[DataSourceResponse]
 )
 async def list_data_sources(
@@ -53,7 +55,7 @@ async def list_data_sources(
 
 
 @router.delete(
-    "/projects/{project_id}/datasources/{ds_id}", 
+    "/{ds_id}", 
     status_code=status.HTTP_204_NO_CONTENT
 )
 async def delete_data_source(

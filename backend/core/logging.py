@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Dict
 from pythonjsonlogger import jsonlogger
 
-from .config import settings
+from backend.core.config import settings
 
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):

@@ -23,7 +23,7 @@ from redis.asyncio import ConnectionPool
 # # Neo4j - 暂时注释，需要单独安装
 # from neo4j import AsyncGraphDatabase
 
-from .config import settings
+from backend.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)

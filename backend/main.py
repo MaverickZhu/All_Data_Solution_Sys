@@ -1,6 +1,8 @@
 """
 多模态智能数据分析平台 - 主应用入口
 """
+import logging
+import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,19 +10,17 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import time
-import logging
 
-# 导入核心模块
-from core.config import settings
-from core.database import init_databases, close_databases
-from core.exceptions import get_exception_handlers
-from core.logging import setup_logging
-
-# 导入路由
-from api.v1.router import api_router
+# 统一使用从 `backend` 开始的绝对路径
+from backend.core.database import init_databases, close_databases
+from backend.core.exceptions import get_exception_handlers
+from backend.core.config import settings
+from backend.core.logging import setup_logging
+from backend.api.v1.router import api_router
 
 # 设置日志
-logger = logging.getLogger("app")
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="一个强大的多模态智能数据分析平台，支持文本、图像、音频、视频等多种数据类型的智能处理和分析。",
+    description=settings.app_description,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
@@ -151,8 +151,8 @@ async def health_check():
     }
 
 
-# 包含API路由
-app.include_router(api_router, prefix=settings.api_prefix)
+# 包含v1的API路由
+app.include_router(api_router, prefix="/api/v1")
 
 
 # 404处理器
@@ -171,13 +171,10 @@ async def not_found(request: Request, exc):
 
 
 if __name__ == "__main__":
-    import uvicorn
-    
-    # 开发环境配置
     uvicorn.run(
         "main:app",
-        host=settings.api_host,
-        port=settings.api_port,
-        reload=settings.debug,
-        log_level=settings.log_level.lower()
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        app_dir="." # 在直接运行时，当前目录就是backend
     )

@@ -7,12 +7,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from core.database import get_db
-from core.security import create_access_token, create_refresh_token, verify_token
-from core.exceptions import AuthenticationException
-from models.user import UserCreate, UserResponse, TokenResponse, UserLogin
-from services.user_service import UserService
+from backend.services.user_service import UserService
+from backend.models.user import UserCreate, UserResponse, TokenResponse, UserLogin
+from backend.core import security
+from backend.core.database import get_db
+from backend.core.config import settings
 import logging
 
 logger = logging.getLogger("api")
@@ -21,10 +22,7 @@ router = APIRouter()
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(
-    user_data: UserCreate,
-    db: AsyncSession = Depends(get_db)
-):
+async def register_user(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     """
     注册新用户
     
@@ -35,14 +33,14 @@ async def register(
     - **bio**: 个人简介（可选）
     """
     # 验证密码长度
-    if len(user_data.password) < 6:
+    if len(user_in.password) < 6:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Password must be at least 6 characters long"
         )
     
     # 创建用户
-    user = await UserService.create_user(db, user_data)
+    user = await UserService.create_user(db, user_in)
     
     return UserResponse.model_validate(user)
 
@@ -68,15 +66,14 @@ async def login(
         raise AuthenticationException("Incorrect username/email or password")
     
     # 创建访问令牌和刷新令牌
-    access_token = create_access_token(
+    access_token = security.create_access_token(
         data={"sub": user.username, "user_id": user.id}
     )
-    refresh_token = create_refresh_token(
+    refresh_token = security.create_refresh_token(
         data={"sub": user.username, "user_id": user.id}
     )
     
     # 计算过期时间（秒）
-    from core.config import settings
     expires_in = settings.access_token_expire_minutes * 60
     
     logger.info(f"User logged in: {user.username}")
@@ -120,17 +117,16 @@ async def refresh_token(
         raise AuthenticationException("User not found or inactive")
     
     # 创建新的访问令牌
-    access_token = create_access_token(
+    access_token = security.create_access_token(
         data={"sub": user.username, "user_id": user.id}
     )
     
     # 创建新的刷新令牌
-    new_refresh_token = create_refresh_token(
+    new_refresh_token = security.create_refresh_token(
         data={"sub": user.username, "user_id": user.id}
     )
     
     # 计算过期时间（秒）
-    from core.config import settings
     expires_in = settings.access_token_expire_minutes * 60
     
     return TokenResponse(

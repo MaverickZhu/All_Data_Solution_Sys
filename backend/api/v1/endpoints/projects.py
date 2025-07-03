@@ -5,13 +5,17 @@ from typing import List
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_db
-from core.security import get_current_active_user
-from models.user import User
-from models.project import ProjectCreate, ProjectUpdate, ProjectResponse
-from services.project_service import ProjectService
+from backend.core.database import get_db
+from backend.core.security import get_current_active_user
+from backend.models.user import User
+from backend.models.project import Project, ProjectCreate, ProjectUpdate, ProjectResponse
+from backend.services.project_service import ProjectService
+from backend.api.v1.endpoints import data_sources
 
 router = APIRouter()
+
+# 将数据源路由作为子路由包含进来
+router.include_router(data_sources.router, prefix="/{project_id}/datasources", tags=["Data Sources"])
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(

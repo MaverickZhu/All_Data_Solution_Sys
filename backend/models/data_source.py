@@ -6,7 +6,7 @@ import enum
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLAlchemyEnum, Float
 from sqlalchemy.orm import relationship
 
-from core.database import Base
+from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
 
 class DataSourceType(str, enum.Enum):
@@ -71,6 +71,16 @@ class DataSourceResponse(DataSourceBase, BaseResponseSchema):
         "from_attributes": True
     }
 
+class DataSourceInDB(DataSourceBase, BaseResponseSchema):
+    id: int
+    project_id: int
+    file_path: Optional[str] = None
+    file_size: Optional[float] = None
+
+    model_config = {
+        "from_attributes": True
+    }
+
 # 在Project模型中添加反向关系
-from .project import Project
+from backend.models.project import Project
 Project.data_sources = relationship("DataSource", back_populates="project", cascade="all, delete-orphan") 

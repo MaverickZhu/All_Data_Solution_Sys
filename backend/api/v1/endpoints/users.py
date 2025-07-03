@@ -5,11 +5,12 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from core.database import get_db
-from core.security import get_current_user, get_current_active_user, get_current_superuser
-from models.user import UserResponse, UserUpdate
-from services.user_service import UserService
+from backend.services.user_service import UserService
+from backend.models.user import User, UserCreate, UserUpdate, UserResponse
+from backend.core.database import get_db
+from backend.core.security import get_current_user, get_current_active_user, get_current_superuser
 import logging
 
 logger = logging.getLogger("api")
@@ -19,20 +20,19 @@ router = APIRouter()
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     获取当前登录用户信息
     """
-    user = await UserService.get_user_by_id(db, current_user["id"])
-    return UserResponse.model_validate(user)
+    return UserResponse.model_validate(current_user)
 
 
 @router.put("/me", response_model=UserResponse)
 async def update_current_user(
     user_update: UserUpdate,
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -46,22 +46,24 @@ async def update_current_user(
     - **password**: 密码
     - **avatar_url**: 头像URL
     """
-    # 普通用户不能修改自己的权限状态
-    if user_update.is_active is not None or user_update.is_superuser is not None:
-        # 创建新的更新对象，排除权限字段
-        update_dict = user_update.model_dump(exclude_unset=True)
-        update_dict.pop('is_active', None)
-        update_dict.pop('is_superuser', None)
-        user_update = UserUpdate(**update_dict)
+    update_data = user_update.model_dump(exclude_unset=True)
     
-    user = await UserService.update_user(db, current_user["id"], user_update)
+    # 用户不能通过此端点修改自己的权限状态，直接忽略这些字段
+    update_data.pop('is_active', None)
+    update_data.pop('is_superuser', None)
+    
+    # 如果没有可更新的内容，则直接返回当前用户信息
+    if not update_data:
+        return UserResponse.model_validate(current_user)
+    
+    user = await UserService.update_user(db, current_user.id, update_data)
     return UserResponse.model_validate(user)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -77,7 +79,7 @@ async def get_user(
 async def update_user(
     user_id: int,
     user_update: UserUpdate,
-    current_user: dict = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -87,14 +89,15 @@ async def update_user(
     - 基本信息（用户名、邮箱等）
     - 权限状态（is_active、is_superuser）
     """
-    user = await UserService.update_user(db, user_id, user_update)
+    update_data = user_update.model_dump(exclude_unset=True)
+    user = await UserService.update_user(db, user_id, update_data)
     return UserResponse.model_validate(user)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
-    current_user: dict = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -107,14 +110,14 @@ async def delete_user(
 @router.post("/{user_id}/activate", response_model=UserResponse)
 async def activate_user(
     user_id: int,
-    current_user: dict = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
     激活用户账号（需要管理员权限）
     """
-    user_update = UserUpdate(is_active=True)
-    user = await UserService.update_user(db, user_id, user_update)
+    update_data = {"is_active": True}
+    user = await UserService.update_user(db, user_id, update_data)
     logger.info(f"User activated by admin: {user.username}")
     return UserResponse.model_validate(user)
 
@@ -122,13 +125,13 @@ async def activate_user(
 @router.post("/{user_id}/deactivate", response_model=UserResponse)
 async def deactivate_user(
     user_id: int,
-    current_user: dict = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
     停用用户账号（需要管理员权限）
     """
-    user_update = UserUpdate(is_active=False)
-    user = await UserService.update_user(db, user_id, user_update)
+    update_data = {"is_active": False}
+    user = await UserService.update_user(db, user_id, update_data)
     logger.info(f"User deactivated by admin: {user.username}")
     return UserResponse.model_validate(user) 

@@ -8,11 +8,12 @@ from typing import List
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import Session
 
-from models.data_source import DataSource, DataSourceCreate, DataSourceType
-from models.project import Project
-from core.exceptions import NotFoundException, AuthorizationException
-from core.config import settings
+from backend.models.data_source import DataSource, DataSourceCreate, DataSourceType
+from backend.models.project import Project
+from backend.core.exceptions import NotFoundException, AuthorizationException
+from backend.core.config import settings
 
 class DataSourceService:
     

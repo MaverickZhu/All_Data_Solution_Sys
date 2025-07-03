@@ -10,8 +10,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .config import settings
-from .database import get_db
+from backend.core.config import settings
+from backend.core.database import get_db
 
 # 密码加密上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -20,7 +20,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_prefix}/auth/login")
 
 # 导入User模型以进行类型提示
-from models.user import User
+from backend.models.user import User
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

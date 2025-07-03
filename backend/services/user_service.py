@@ -7,12 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 
-from models.user import User, UserCreate, UserUpdate
-from core.security import get_password_hash, verify_password
-from core.exceptions import NotFoundException, DuplicateException, ValidationException
+from backend.models.user import User, UserCreate, UserUpdate
+from backend.core.security import get_password_hash, verify_password
+from backend.core.exceptions import NotFoundException, DuplicateException, ValidationException
 import logging
 
-logger = logging.getLogger("service")
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -157,7 +157,7 @@ class UserService:
     async def update_user(
         db: AsyncSession, 
         user_id: int, 
-        user_update: UserUpdate
+        update_data: dict
     ) -> User:
         """
         更新用户信息
@@ -165,7 +165,7 @@ class UserService:
         Args:
             db: 数据库会话
             user_id: 用户ID
-            user_update: 更新数据
+            update_data: 包含更新字段的字典
             
         Returns:
             更新后的用户对象
@@ -177,27 +177,27 @@ class UserService:
         user = await UserService.get_user_by_id(db, user_id)
         
         # 检查用户名是否被其他用户使用
-        if user_update.username and user_update.username != user.username:
+        if "username" in update_data and update_data["username"] and update_data["username"] != user.username:
             result = await db.execute(
-                select(User).where(User.username == user_update.username)
+                select(User).where(User.username == update_data["username"])
             )
             if result.scalar_one_or_none():
-                raise DuplicateException("User", "username", user_update.username)
+                raise DuplicateException("User", "username", update_data["username"])
         
         # 检查邮箱是否被其他用户使用
-        if user_update.email and user_update.email != user.email:
+        if "email" in update_data and update_data["email"] and update_data["email"] != user.email:
             result = await db.execute(
-                select(User).where(User.email == user_update.email)
+                select(User).where(User.email == update_data["email"])
             )
             if result.scalar_one_or_none():
-                raise DuplicateException("User", "email", user_update.email)
-        
-        # 更新字段
-        update_data = user_update.model_dump(exclude_unset=True)
+                raise DuplicateException("User", "email", update_data["email"])
         
         # 如果更新密码，需要加密
-        if "password" in update_data:
+        if "password" in update_data and update_data["password"]:
             update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
+        elif "password" in update_data:
+            # 如果密码字段存在但为空或None，则从更新数据中移除，避免将密码设置为空
+            update_data.pop("password")
         
         for field, value in update_data.items():
             setattr(user, field, value)

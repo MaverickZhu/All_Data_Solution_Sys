@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # 应用基本信息
     app_name: str = Field(default="多模态智能数据分析平台", env="APP_NAME")
     app_version: str = Field(default="1.0.0", env="APP_VERSION")
+    app_description: str = Field(default="一个集成了多种数据源、AI模型和分析工具的智能数据处理与分析平台。", env="APP_DESCRIPTION")
     app_env: str = Field(default="development", env="APP_ENV")
     debug: bool = Field(default=True, env="DEBUG")
     

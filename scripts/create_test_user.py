@@ -3,16 +3,10 @@
 用于开发和测试环境
 """
 import asyncio
-import sys
-import os
-
-# 添加backend目录到Python路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.database import AsyncSessionLocal, init_db
-from services.user_service import UserService
-from models.user import UserCreate
+from backend.core.database import AsyncSessionLocal, init_db
+from backend.models.user import UserCreate
+from backend.services.user_service import UserService
 
 test_users = [
     {
@@ -48,14 +42,15 @@ async def create_test_users():
         for user_data in test_users:
             try:
                 # 检查用户是否已存在
-                existing_user = await UserService.get_user_by_username(db, user_data["username"])
+                user_service = UserService(db)
+                existing_user = await user_service.get_user_by_username(user_data["username"])
                 if existing_user:
                     print(f"⚠️ 用户 '{user_data['username']}' 已存在，跳过创建")
                     continue
                 
                 # 创建用户
                 user_create = UserCreate(**user_data)
-                user = await UserService.create_user(db, user_create)
+                user = await user_service.create_user(user_create)
                 print(f"✅ 创建用户成功: {user.username} (超级用户: {user.is_superuser})")
                 
             except Exception as e:
@@ -71,5 +66,35 @@ async def create_test_users():
     print("└─────────────┴──────────────┴─────────────┘")
 
 
+async def main():
+    """主函数，创建测试用户"""
+    print("开始创建测试用户...")
+    db: AsyncSession = AsyncSessionLocal()
+    try:
+        # 在这里定义测试用户信息
+        user_in = UserCreate(
+            username="demo",
+            email="demo@example.com",
+            password="password",
+            full_name="Demo User",
+            bio="This is a demo user for testing purposes."
+        )
+        
+        existing_user = await UserService.get_user_by_username(db, user_in.username)
+        
+        if existing_user:
+            print(f"用户 '{user_in.username}' 已存在，跳过创建。")
+        else:
+            new_user = await UserService.create_user(db, user_in)
+            print(f"✅ 用户 '{new_user.username}' 创建成功！")
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"创建用户时发生错误: {e}")
+    finally:
+        await db.close()
+        print("数据库连接已关闭。")
+
 if __name__ == "__main__":
-    asyncio.run(create_test_users()) 
+    asyncio.run(main())

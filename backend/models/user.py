@@ -4,7 +4,7 @@
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import relationship
-from core.database import Base
+from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
 
 

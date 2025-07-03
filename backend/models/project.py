@@ -4,7 +4,7 @@
 from typing import Optional, Dict, Any
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
-from core.database import Base
+from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
 import enum
 from pydantic import BaseModel
@@ -61,5 +61,5 @@ class ProjectResponse(ProjectBase, BaseResponseSchema):
     # owner: Optional[UserResponse] = None
 
 # 在User模型中添加反向关系
-from .user import User
+from backend.models.user import User
 User.projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan") 
