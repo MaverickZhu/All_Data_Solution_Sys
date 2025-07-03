@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     mongodb_database: str = Field(default="multimodal_analysis", env="MONGODB_DATABASE")
     
     # Redis配置
-    redis_url: str = Field(default="redis://localhost:6380/0", env="REDIS_URL")
+    redis_url: str = Field(default="redis://multimodal_redis:6379/0", env="REDIS_URL")
     redis_password: Optional[str] = Field(default="multimodal123", env="REDIS_PASSWORD")
     
     # Milvus配置
@@ -83,8 +83,8 @@ class Settings(BaseSettings):
     )
     
     # Celery配置
-    celery_broker_url: str = Field(default="redis://localhost:6379/1", env="CELERY_BROKER_URL")
-    celery_result_backend: str = Field(default="redis://localhost:6379/2", env="CELERY_RESULT_BACKEND")
+    celery_broker_url: str = Field(default="redis://:multimodal123@multimodal_redis:6379/1", env="CELERY_BROKER_URL")
+    celery_result_backend: str = Field(default="redis://:multimodal123@multimodal_redis:6379/2", env="CELERY_RESULT_BACKEND")
     
     @validator("cors_origins", pre=True)
     def parse_cors_origins(cls, v):
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
             os.makedirs(dir_path, exist_ok=True)
     
     class Config:
-        env_file = ".env"
+        env_file = "/app/.env"
         env_file_encoding = "utf-8"
         case_sensitive = False
 

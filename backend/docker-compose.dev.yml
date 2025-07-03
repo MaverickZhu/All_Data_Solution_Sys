@@ -1,49 +1,81 @@
 version: '3.8'
 
 services:
-  # Redis - 项目专用缓存数据库
-  multimodal_redis:
-    image: redis:7-alpine
-    container_name: multimodal_redis
-    ports:
-      - "6380:6379"  # 使用6380端口避免冲突
-    command: redis-server --appendonly yes --requirepass multimodal123
-    volumes:
-      - multimodal_redis_data:/data
-    networks:
-      - multimodal_network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "multimodal123", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # PostgreSQL - 项目专用（如果需要）
-  multimodal_postgres:
-    image: postgres:16-alpine
+  postgres:
+    image: timescale/timescaledb:latest-pg14
     container_name: multimodal_postgres
     ports:
-      - "5433:5432"  # 使用5433端口避免冲突
+      - "5433:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: multimodal123
       POSTGRES_DB: multimodal_analysis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
     volumes:
-      - multimodal_postgres_data:/var/lib/postgresql/data
+      - ./data/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d multimodal_analysis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - multimodal_network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
-volumes:
-  multimodal_redis_data:
-  multimodal_postgres_data:
+  multimodal_redis:
+    image: redis:latest
+    container_name: multimodal_redis
+    ports:
+      - "6380:6379"
+    command: redis-server --requirepass multimodal123
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "multimodal123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - multimodal_network
+
+  backend:
+    build:
+      context: ..
+      dockerfile: ./Dockerfile
+    command: sh -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    working_dir: /app/backend
+    volumes:
+      - ../backend:/app/backend
+      - ../logs:/app/logs
+      - ../.env:/app/.env
+    ports:
+      - "8008:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      multimodal_redis:
+        condition: service_healthy
+    networks:
+      - multimodal_network
+    env_file:
+      - ../.env
+    environment:
+      - APP_ENV=docker
+
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: ./Dockerfile
+    command: sh -c "celery -A main.celery_worker worker --loglevel=info"
+    working_dir: /app/backend
+    volumes:
+      - ../backend:/app/backend
+      - ../logs:/app/logs
+      - ../.env:/app/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      multimodal_redis:
+        condition: service_healthy
+    networks:
+      - multimodal_network
 
 networks:
   multimodal_network:
-    driver: bridge 
+    driver: bridge

@@ -3,15 +3,15 @@
 """
 from typing import Optional
 import enum
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLAlchemyEnum, Float
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, Float
 from sqlalchemy.orm import relationship
-
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
 from enum import Enum
 from ..models.base import Auditable
 
-class DataSourceType(str, Enum):
+class DataSourceType(str, enum.Enum):
     """数据源类型枚举"""
     CSV = "csv"
     JSON = "json"
@@ -21,7 +21,14 @@ class DataSourceType(str, Enum):
     VIDEO = "video"
     AUDIO = "audio"
     DATABASE = "database"
+    API = "api"
     UNKNOWN = "unknown"
+
+class ProfileStatusEnum(str, enum.Enum):
+    pending = "pending"
+    in_progress = "in_progress"
+    completed = "completed"
+    failed = "failed"
 
 class DataSource(Base, Auditable):
     """数据源模型"""
@@ -35,14 +42,14 @@ class DataSource(Base, Auditable):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     project = relationship("Project", back_populates="data_sources")
     
-    data_source_type = Column(String, nullable=False, default=DataSourceType.UNKNOWN.value)
+    data_source_type = Column(PgEnum(DataSourceType, name="data_source_type_enum"), nullable=False)
     
     # 对于文件类型的数据源
     file_path = Column(String(1024), nullable=True)
     file_size = Column(Float, nullable=True)  # in bytes
     
-    # 对于数据库类型的数据源
-    connection_params = Column(String, nullable=True)  # For database connections, stored as JSON string
+    profile_status = Column(PgEnum(ProfileStatusEnum, name="profile_status_enum"), default=ProfileStatusEnum.pending)
+    profile_report_path = Column(String, nullable=True)
 
     def __repr__(self):
         return f"<DataSource(id={self.id}, name='{self.name}', project_id={self.project_id})>"
@@ -58,7 +65,6 @@ class DataSourceCreate(DataSourceBase):
     project_id: int
     file_path: Optional[str] = None
     file_size: Optional[float] = None
-    connection_params: Optional[dict] = None
 
 class DataSourceUpdate(BaseUpdateSchema):
     name: Optional[str] = None
