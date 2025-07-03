@@ -1,6 +1,6 @@
 """
 认证相关的API端点
-包含注册、登录、刷新令牌等功能
+包含登录、刷新令牌等功能
 """
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -21,39 +21,15 @@ logger = logging.getLogger("api")
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register_user(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
-    """
-    注册新用户
-    
-    - **username**: 用户名（唯一）
-    - **email**: 邮箱（唯一）
-    - **password**: 密码（至少6位）
-    - **full_name**: 全名（可选）
-    - **bio**: 个人简介（可选）
-    """
-    # 验证密码长度
-    if len(user_in.password) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Password must be at least 6 characters long"
-        )
-    
-    # 创建用户
-    user = await UserService.create_user(db, user_in)
-    
-    return UserResponse.model_validate(user)
-
-
-@router.post("/login", response_model=TokenResponse)
-async def login(
+@router.post("/token", response_model=TokenResponse)
+async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: AsyncSession = Depends(get_db)
 ):
     """
-    用户登录
+    用户登录获取访问令牌
     
-    支持用户名或邮箱登录
+    使用标准的OAuth2表单请求 (username & password)
     """
     # 验证用户
     user = await UserService.authenticate_user(
@@ -63,7 +39,17 @@ async def login(
     )
     
     if not user:
-        raise AuthenticationException("Incorrect username/email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Inactive user"
+        )
     
     # 创建访问令牌和刷新令牌
     access_token = security.create_access_token(

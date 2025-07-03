@@ -8,8 +8,10 @@ from sqlalchemy.orm import relationship
 
 from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
+from enum import Enum
+from ..models.base import Auditable
 
-class DataSourceType(str, enum.Enum):
+class DataSourceType(str, Enum):
     """数据源类型枚举"""
     CSV = "csv"
     JSON = "json"
@@ -21,7 +23,7 @@ class DataSourceType(str, enum.Enum):
     DATABASE = "database"
     UNKNOWN = "unknown"
 
-class DataSource(Base, TimestampMixin, SoftDeleteMixin):
+class DataSource(Base, Auditable):
     """数据源模型"""
     
     __tablename__ = "data_sources"
@@ -33,14 +35,14 @@ class DataSource(Base, TimestampMixin, SoftDeleteMixin):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     project = relationship("Project", back_populates="data_sources")
     
-    type = Column(SQLAlchemyEnum(DataSourceType), nullable=False)
+    data_source_type = Column(String, nullable=False, default=DataSourceType.UNKNOWN.value)
     
     # 对于文件类型的数据源
     file_path = Column(String(1024), nullable=True)
     file_size = Column(Float, nullable=True)  # in bytes
     
     # 对于数据库类型的数据源
-    # connection_string = Column(String(1024), nullable=True)
+    connection_params = Column(String, nullable=True)  # For database connections, stored as JSON string
 
     def __repr__(self):
         return f"<DataSource(id={self.id}, name='{self.name}', project_id={self.project_id})>"
@@ -56,20 +58,23 @@ class DataSourceCreate(DataSourceBase):
     project_id: int
     file_path: Optional[str] = None
     file_size: Optional[float] = None
+    connection_params: Optional[dict] = None
 
 class DataSourceUpdate(BaseUpdateSchema):
     name: Optional[str] = None
     description: Optional[str] = None
 
-class DataSourceResponse(DataSourceBase, BaseResponseSchema):
+class DataSourceResponse(BaseModel):
     id: int
+    name: str
+    description: Optional[str] = None
     project_id: int
+    data_source_type: str
     file_path: Optional[str] = None
     file_size: Optional[float] = None
 
-    model_config = {
-        "from_attributes": True
-    }
+    class Config:
+        from_attributes = True
 
 class DataSourceInDB(DataSourceBase, BaseResponseSchema):
     id: int

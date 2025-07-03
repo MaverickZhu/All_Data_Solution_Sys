@@ -3,22 +3,25 @@
 提供通用的模型功能
 """
 from datetime import datetime, timezone
-from typing import Optional
-from sqlalchemy import Column, DateTime, Integer, String, Boolean
+from typing import Optional, List
+from sqlalchemy import Column, DateTime, Integer, String, Boolean, func
 from sqlalchemy.ext.declarative import declared_attr
 from pydantic import BaseModel, ConfigDict
+import pytz
+from sqlalchemy.orm import declarative_base
 
+Base = declarative_base()
 
 class TimestampMixin:
     """时间戳混入类"""
     
     @declared_attr
     def created_at(cls):
-        return Column(DateTime, default=datetime.utcnow, nullable=False)
+        return Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     @declared_attr
     def updated_at(cls):
-        return Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+        return Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class SoftDeleteMixin:
@@ -26,7 +29,7 @@ class SoftDeleteMixin:
     
     @declared_attr
     def deleted_at(cls):
-        return Column(DateTime, nullable=True)
+        return Column(DateTime(timezone=True), nullable=True)
     
     @declared_attr
     def is_deleted(cls):
@@ -78,22 +81,32 @@ class PaginationParams(BaseModel):
         return self.page_size
 
 
-class PaginatedResponse(BaseModel):
-    """分页响应"""
-    items: list
-    total: int
+class Page(BaseModel):
+    items: List
     page: int
-    page_size: int
+    size: int
+    total: int
     pages: int
     
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     @classmethod
-    def create(cls, items: list, total: int, pagination: PaginationParams):
-        """创建分页响应"""
-        pages = (total + pagination.page_size - 1) // pagination.page_size
+    def create(cls, items: List, page: int, size: int, total: int):
         return cls(
             items=items,
+            page=page,
+            size=size,
             total=total,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            pages=pages
-        ) 
+            pages=(total + size - 1) // size if size > 0 else 0
+        )
+
+
+class Auditable:
+    """
+    一个提供审计字段（创建时间、更新时间、软删除）的Mixin类。
+    所有时间都以UTC时区存储。
+    """
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="最后更新时间")
+    deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间")
+    is_deleted = Column(Boolean, default=False, nullable=False, comment="是否被删除") 

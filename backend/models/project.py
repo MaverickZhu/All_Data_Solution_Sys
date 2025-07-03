@@ -1,13 +1,15 @@
 """
 项目数据模型
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
 import enum
 from pydantic import BaseModel
+from ..models.base import Auditable
+from .data_source import DataSourceResponse
 
 class ProjectStatus(str, enum.Enum):
     """项目状态枚举"""
@@ -16,19 +18,21 @@ class ProjectStatus(str, enum.Enum):
     PENDING = "pending"
     DELETED = "deleted"
 
-class Project(Base, TimestampMixin, SoftDeleteMixin):
+class Project(Base, Auditable):
     """项目模型"""
     
     __tablename__ = "projects"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, index=True)
-    description = Column(Text, nullable=True)
+    name = Column(String(255), nullable=False, index=True)
+    description = Column(String, nullable=True)
     
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     owner = relationship("User", back_populates="projects")
     
     status = Column(SQLAlchemyEnum(ProjectStatus), default=ProjectStatus.ACTIVE, nullable=False)
+    
+    data_sources = relationship("DataSource", back_populates="project", cascade="all, delete-orphan")
     
     # 使用JSONB存储项目特定配置
     # from sqlalchemy.dialects.postgresql import JSONB

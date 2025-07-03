@@ -78,7 +78,13 @@ class DataSourceService:
             file_size=file_size
         )
         
-        db_ds = DataSource(**ds_create_data.model_dump())
+        # 将Pydantic模型转换为字典，并处理枚举
+        data_for_orm = ds_create_data.model_dump()
+        # The 'type' field from Pydantic is already the enum's value (a string)
+        # We just need to rename the key to match the ORM model's attribute
+        data_for_orm['data_source_type'] = data_for_orm.pop('type')
+
+        db_ds = DataSource(**data_for_orm)
         db.add(db_ds)
         await db.commit()
         await db.refresh(db_ds)

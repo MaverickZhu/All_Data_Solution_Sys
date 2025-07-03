@@ -18,6 +18,38 @@ logger = logging.getLogger("api")
 router = APIRouter()
 
 
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    user_create: UserCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    创建新用户（注册）
+    - **username**: 必须，唯一的用户名
+    - **email**: 必须，唯一的邮箱
+    - **password**: 必须，密码
+    """
+    # 检查用户名是否已存在
+    existing_user_by_name = await UserService.get_user_by_username(db, user_create.username)
+    if existing_user_by_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Username '{user_create.username}' is already registered.",
+        )
+    
+    # 检查邮箱是否已存在
+    existing_user_by_email = await UserService.get_user_by_email(db, user_create.email)
+    if existing_user_by_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Email '{user_create.email}' is already registered.",
+        )
+        
+    user = await UserService.create_user(db, user_create)
+    # 不应该在响应中返回完整的user对象，特别是密码哈希
+    return UserResponse.model_validate(user)
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
     current_user: User = Depends(get_current_active_user),

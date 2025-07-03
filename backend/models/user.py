@@ -6,9 +6,12 @@ from sqlalchemy import Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import relationship
 from backend.core.database import Base
 from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
+from pydantic import BaseModel, EmailStr, Field
+
+from ..models.base import Auditable
 
 
-class User(Base, TimestampMixin, SoftDeleteMixin):
+class User(Base, Auditable):
     """用户模型"""
     
     __tablename__ = "users"
@@ -27,7 +30,7 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     is_verified = Column(Boolean, default=False, nullable=False)
     
     # 关系
-    # projects = relationship("Project", back_populates="owner")
+    projects = relationship("Project", back_populates="owner")
     # analyses = relationship("Analysis", back_populates="user")
     
     def __repr__(self):
