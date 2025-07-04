@@ -42,8 +42,11 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(default=10, env="DB_MAX_OVERFLOW")
     db_pool_timeout: int = Field(default=30, env="DB_POOL_TIMEOUT")
     
+    # 为Celery Worker添加的同步数据库URL
+    sync_database_url: Optional[str] = Field(default=None, env="SYNC_DATABASE_URL")
+    
     # MongoDB配置
-    mongodb_url: str = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
+    mongodb_url: str = Field(default="mongodb://localhost:27018", env="MONGODB_URL")
     mongodb_database: str = Field(default="multimodal_analysis", env="MONGODB_DATABASE")
     
     # Redis配置
@@ -85,6 +88,16 @@ class Settings(BaseSettings):
     # Celery配置
     celery_broker_url: str = Field(default="redis://:multimodal123@multimodal_redis:6379/1", env="CELERY_BROKER_URL")
     celery_result_backend: str = Field(default="redis://:multimodal123@multimodal_redis:6379/2", env="CELERY_RESULT_BACKEND")
+    
+    @validator("sync_database_url", pre=True, always=True)
+    def set_sync_database_url(cls, v, values):
+        """如果未提供，则根据异步URL自动生成同步URL，以供Celery等同步任务使用"""
+        if v:
+            return v
+        async_url = values.get("database_url")
+        if async_url:
+            return async_url.replace("+asyncpg", "")
+        raise ValueError("DATABASE_URL must be set to generate SYNC_DATABASE_URL")
     
     @validator("cors_origins", pre=True)
     def parse_cors_origins(cls, v):

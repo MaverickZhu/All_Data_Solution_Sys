@@ -1,7 +1,9 @@
 """
 用户数据模型
 """
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
 from sqlalchemy import Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import relationship
 from backend.core.database import Base
@@ -9,6 +11,9 @@ from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateS
 from pydantic import BaseModel, EmailStr, Field
 
 from ..models.base import Auditable
+
+if TYPE_CHECKING:
+    from .project import Project
 
 
 class User(Base, Auditable):
@@ -30,7 +35,7 @@ class User(Base, Auditable):
     is_verified = Column(Boolean, default=False, nullable=False)
     
     # 关系
-    projects = relationship("Project", back_populates="owner")
+    projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
     # analyses = relationship("Analysis", back_populates="user")
     
     def __repr__(self):

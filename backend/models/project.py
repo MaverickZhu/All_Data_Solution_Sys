@@ -1,15 +1,22 @@
 """
 项目数据模型
 """
-from typing import Optional, Dict, Any, List
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLAlchemyEnum
-from sqlalchemy.orm import relationship
-from backend.core.database import Base
-from .base import TimestampMixin, SoftDeleteMixin, BaseCreateSchema, BaseUpdateSchema, BaseResponseSchema
+from __future__ import annotations
+
 import enum
-from pydantic import BaseModel
-from ..models.base import Auditable
-from .data_source import DataSourceResponse
+from typing import TYPE_CHECKING, List, Optional
+
+from sqlalchemy import Column, Enum as SQLAlchemyEnum, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+
+from backend.core.database import Base
+from .base import (Auditable, BaseCreateSchema, BaseResponseSchema,
+                   BaseUpdateSchema)
+
+if TYPE_CHECKING:
+    from .data_source import DataSource, DataSourceResponse
+    from .user import User
+
 
 class ProjectStatus(str, enum.Enum):
     """项目状态枚举"""
@@ -61,9 +68,7 @@ class ProjectUpdate(BaseUpdateSchema):
 
 class ProjectResponse(ProjectBase, BaseResponseSchema):
     owner_id: int
-    # 可以添加owner信息
-    # owner: Optional[UserResponse] = None
+    data_sources: List["DataSourceResponse"] = []
 
-# 在User模型中添加反向关系
-from backend.models.user import User
-User.projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan") 
+    class Config:
+        from_attributes = True 

@@ -71,9 +71,9 @@ services:
     image: prom/prometheus:latest
     container_name: multimodal_prometheus
     ports:
-      - "9090:9090"
+      - "19090:9090"
     volumes:
-      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/:/etc/prometheus/
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -86,7 +86,7 @@ services:
     image: grafana/grafana:latest
     container_name: multimodal_grafana
     ports:
-      - "3001:3000"
+      - "13001:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin123
@@ -103,8 +103,8 @@ services:
     image: minio/minio:latest
     container_name: multimodal_minio
     ports:
-      - "9000:9000"   # API
-      - "9001:9001"   # Console
+      - "19000:9000"   # API
+      - "19001:9001"   # Console
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin123

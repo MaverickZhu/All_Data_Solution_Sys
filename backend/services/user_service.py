@@ -139,7 +139,7 @@ class UserService:
         """
         user = await UserService.get_user_by_username(db, username)
         if not user:
-            # 也尝试通过邮箱登录
+            # 也尝试通过邮箱登录 (修正拼写错误)
             user = await UserService.get_user_by_email(db, username)
         
         if not user:

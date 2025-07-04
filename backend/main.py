@@ -12,33 +12,45 @@ from fastapi.responses import JSONResponse
 import time
 
 # 统一使用从 `backend` 开始的绝对路径
-from backend.core.database import init_databases, close_databases
 from backend.core.exceptions import get_exception_handlers
 from backend.core.config import settings
-from backend.core.logging import setup_logging
+from backend.core.logging import setup_logging, logger
 from backend.api.v1.router import api_router
 
 # 设置日志
 setup_logging()
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    应用生命周期管理器
+    应用生命周期管理
     """
-    # 应用启动时执行
-    logger.info(f"Starting {settings.app_name} v{settings.app_version}")
-    await init_databases()
-    logger.info("All databases initialized successfully")
+    # 导入所有数据库管理器的正确类名
+    from backend.core.database import (
+        init_db, 
+        close_databases, 
+        MongoDB, 
+        RedisManager, 
+        Neo4jManager
+    )
+
+    logger.info("Application startup: Initializing database connections...")
+    # 初始化各个数据库连接
+    await init_db() # 初始化PostgreSQL表结构
+    await MongoDB.connect()
+    await RedisManager.connect()
+    await Neo4jManager.connect()
+    
+    # 创建必要的目录
+    settings.create_directories()
     
     yield
     
-    # 应用关闭时执行
-    logger.info("Shutting down application...")
-    await close_databases()
-    logger.info("Application shutdown complete")
+    logger.info("Application shutdown: Closing database connections...")
+    # 关闭所有数据库连接
+    await close_databases() # 这个函数会处理所有数据库的关闭
+    logger.info("All database connections closed.")
 
 
 # 创建FastAPI应用实例

@@ -3,9 +3,18 @@
 用于开发和测试环境
 """
 import asyncio
+import sys
+import os
+
+# 将项目根目录添加到Python的模块搜索路径中
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.database import AsyncSessionLocal, init_db
-from backend.models.user import UserCreate
+from backend.models.user import UserCreate, User
+from backend.models.project import Project
+from backend.models.data_source import DataSource
+from backend.models.task import ProcessingTask
 from backend.services.user_service import UserService
 
 test_users = [

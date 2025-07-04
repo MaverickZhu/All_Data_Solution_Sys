@@ -34,6 +34,39 @@ services:
     networks:
       - multimodal_network
 
+  mongodb:
+    image: mongo:6.0
+    container_name: multimodal_mongo
+    ports:
+      - "27018:27017"
+    volumes:
+      - ./data/mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - multimodal_network
+
+  neo4j:
+    image: neo4j:5.15
+    container_name: multimodal_neo4j_dev
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    volumes:
+      - ./data/neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password123", "RETURN 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - multimodal_network
+
   backend:
     build:
       context: ..
@@ -41,9 +74,7 @@ services:
     command: sh -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     working_dir: /app/backend
     volumes:
-      - ../backend:/app/backend
-      - ../logs:/app/logs
-      - ../.env:/app/.env
+      - ..:/app
     ports:
       - "8008:8000"
     depends_on:
@@ -51,30 +82,54 @@ services:
         condition: service_healthy
       multimodal_redis:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
     networks:
       - multimodal_network
-    env_file:
-      - ../.env
     environment:
       - APP_ENV=docker
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/multimodal_analysis
+      - MONGODB_URL=mongodb://mongodb:27017
+      - REDIS_URL=redis://:multimodal123@multimodal_redis:6379/0
+      - CELERY_BROKER_URL=redis://:multimodal123@multimodal_redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:multimodal123@multimodal_redis:6379/2
+      - SECRET_KEY=a-very-secret-key-for-this-app
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3001","http://127.0.0.1:3001"]
+      - NEO4J_URI=bolt://neo4j:7687
 
   celery-worker:
     build:
       context: ..
       dockerfile: ./Dockerfile
-    command: sh -c "celery -A main.celery_worker worker --loglevel=info"
+    command: sh -c "celery -A core.celery_app:celery_app worker -l info"
     working_dir: /app/backend
     volumes:
-      - ../backend:/app/backend
-      - ../logs:/app/logs
-      - ../.env:/app/.env
+      - ..:/app
+    ports: []
     depends_on:
       postgres:
         condition: service_healthy
       multimodal_redis:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    restart: on-failure
     networks:
       - multimodal_network
+    environment:
+      - APP_ENV=docker
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/multimodal_analysis
+      - MONGODB_URL=mongodb://mongodb:27017
+      - REDIS_URL=redis://:multimodal123@multimodal_redis:6379/0
+      - CELERY_BROKER_URL=redis://:multimodal123@multimodal_redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:multimodal123@multimodal_redis:6379/2
+      - SECRET_KEY=a-very-secret-key-for-this-app
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3001","http://127.0.0.1:3001"]
+      - NEO4J_URI=bolt://neo4j:7687
 
 networks:
   multimodal_network:

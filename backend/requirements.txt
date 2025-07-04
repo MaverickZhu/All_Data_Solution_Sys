@@ -1,0 +1,43 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+asyncpg
+psycopg2-binary
+alembic
+celery[redis]
+pydantic
+pydantic-settings
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+ydata-profiling[default]
+loguru
+requests
+# Data Science & ML
+pandas
+numpy
+scikit-learn
+# NLP
+nltk
+transformers
+# Image Processing
+Pillow
+imagehash
+# Vector DB
+pymilvus
+# Graph DB
+neo4j
+# Other
+email_validator
+fastapi-limiter
+gunicorn
+uvloop
+httptools
+# Testing
+pytest
+pytest-asyncio
+httpx
+requests
+coverage
+Faker 

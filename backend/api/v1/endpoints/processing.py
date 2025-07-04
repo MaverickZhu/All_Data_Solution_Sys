@@ -1,15 +1,17 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from celery.result import AsyncResult
+from celery.result import AsyncResult # type: ignore
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.services.data_source_service import DataSourceService
-from backend.services.user_service import UserService
-from backend.models.user import User
 from backend.processing.tasks import run_profiling_task
 from backend.core.celery_app import celery_app
+from backend.models.user import User
+from backend.core.security import get_current_active_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -20,15 +22,17 @@ router = APIRouter()
 async def start_profiling_job(
     data_source_id: int,
     project_id: int = Query(..., description="项目ID"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(UserService.get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     为指定的数据源启动一个异步的数据探查分析任务。
     """
+    logger.info(f"[DEBUG] Received request to start profiling for data_source_id={data_source_id} in project_id={project_id} by user {current_user.email}")
+
     # 验证用户有权访问该数据源
     data_source = await DataSourceService.get_data_source_by_id(
-        db, data_source_id=data_source_id, project_id=project_id
+        db, ds_id=data_source_id, project_id=project_id
     )
     if not data_source:
         raise HTTPException(
@@ -37,13 +41,19 @@ async def start_profiling_job(
         )
 
     # 启动后台Celery任务
+    logger.info(f"[DEBUG] Found data source, dispatching Celery task for data_source_id: {data_source.id}")
     task = run_profiling_task.delay(data_source.id)
+    logger.info(f"[DEBUG] Celery task dispatched with task_id: {task.id}")
 
     return {"task_id": task.id, "message": "Profiling task started successfully."}
 
 
 @router.get("/profile/status/{task_id}", summary="查询分析任务的状态和结果")
-def get_profiling_status(task_id: str):
+async def get_profiling_status(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    # current_user: User = Depends(get_current_active_user), # Temporarily disabled for testing
+):
     """
     根据任务ID查询Celery任务的状态。
     """
