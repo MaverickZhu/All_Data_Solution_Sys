@@ -34,8 +34,8 @@ class Project(Base, Auditable):
     name = Column(String(255), nullable=False, index=True)
     description = Column(String, nullable=True)
     
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    owner = relationship("User", back_populates="projects")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    owner = relationship("User", back_populates="projects", foreign_keys=[user_id])
     
     status = Column(SQLAlchemyEnum(ProjectStatus), default=ProjectStatus.ACTIVE, nullable=False)
     
@@ -46,7 +46,7 @@ class Project(Base, Auditable):
     # config = Column(JSONB, nullable=True)
 
     def __repr__(self):
-        return f"<Project(id={self.id}, name='{self.name}', owner_id={self.owner_id})>"
+        return f"<Project(id={self.id}, name='{self.name}', user_id={self.user_id})>"
 
 
 # Pydantic模型
@@ -67,8 +67,9 @@ class ProjectUpdate(BaseUpdateSchema):
     # config: Optional[Dict[str, Any]] = None
 
 class ProjectResponse(ProjectBase, BaseResponseSchema):
-    owner_id: int
-    data_sources: List["DataSourceResponse"] = []
+    user_id: int
+    # 暂时移除data_sources以避免异步关系加载问题
+    # data_sources: List["DataSourceResponse"] = []
 
     class Config:
         from_attributes = True 

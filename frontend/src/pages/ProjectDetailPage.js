@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
 import Modal from '../components/Modal';
@@ -179,13 +179,20 @@ const ProjectDetailPage = () => {
                   title={dataSource.name}
                   subtitle={dataSource.type}
                   actions={
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => handleDeleteDataSource(dataSource.id)}
-                    >
-                      删除
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Link to={`/datasource/${dataSource.id}`}>
+                        <Button variant="secondary" size="sm">
+                          查看详情
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => handleDeleteDataSource(dataSource.id)}
+                      >
+                        删除
+                      </Button>
+                    </div>
                   }
                 >
                   <div className="space-y-2">

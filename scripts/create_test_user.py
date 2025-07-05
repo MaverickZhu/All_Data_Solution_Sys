@@ -14,7 +14,7 @@ from backend.core.database import AsyncSessionLocal, init_db
 from backend.models.user import UserCreate, User
 from backend.models.project import Project
 from backend.models.data_source import DataSource
-from backend.models.task import ProcessingTask
+from backend.models.task import Task
 from backend.services.user_service import UserService
 
 test_users = [

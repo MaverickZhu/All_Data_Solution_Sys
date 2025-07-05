@@ -14,7 +14,7 @@ class ProjectService:
     @staticmethod
     async def create_project(db: AsyncSession, project_data: ProjectCreate, current_user: User) -> Project:
         """创建一个新项目"""
-        db_project = Project(**project_data.model_dump(), owner_id=current_user.id)
+        db_project = Project(**project_data.model_dump(), user_id=current_user.id)
         db.add(db_project)
         await db.commit()
         await db.refresh(db_project)
@@ -29,7 +29,7 @@ class ProjectService:
             raise NotFoundException("Project", project_id)
         
         # 只有项目所有者或超级用户可以查看
-        if project.owner_id != current_user.id and not current_user.is_superuser:
+        if project.user_id != current_user.id and not current_user.is_superuser:
             raise AuthorizationException("You don't have permission to access this project.")
             
         return project
@@ -39,7 +39,7 @@ class ProjectService:
         """获取一个用户的所有项目"""
         result = await db.execute(
             select(Project)
-            .where(Project.owner_id == user_id, Project.is_deleted == False)
+            .where(Project.user_id == user_id, Project.is_deleted == False)
             .order_by(Project.created_at.desc())
         )
         return result.scalars().all()

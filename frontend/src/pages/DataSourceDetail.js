@@ -45,10 +45,14 @@ const DataSourceDetail = () => {
     }, [dataSourceId, startPolling]);
 
     const handleStartProfiling = async () => {
+        if (!dataSource?.project_id) {
+            setStartError('项目ID未知，无法开始分析。');
+            return;
+        }
         setStartError('');
         resetTask(); // 重置上一次的任务状态
         try {
-            const response = await api.startDataProfiling(dataSourceId);
+            const response = await api.startDataProfiling(dataSourceId, dataSource.project_id);
             const newTaskId = response.data.task_id;
             if (newTaskId) {
                 startPolling(newTaskId); // 启动轮询
@@ -57,12 +61,20 @@ const DataSourceDetail = () => {
             }
         } catch (error) {
             console.error('Failed to start data profiling:', error);
-            setStartError('启动数据分析失败，请检查控制台获取详情。');
+            setStartError(error.response?.data?.detail || '启动数据分析失败，请检查控制台获取详情。');
         }
     };
     
     // 从后端获取的最新分析结果
-    const latestReport = taskResult || (dataSource?.profiling_status === 'completed' ? dataSource.profiling_result : null);
+    const latestReportString = taskResult || (dataSource?.profiling_status === 'completed' ? dataSource.profiling_result : null);
+    let latestReport = null;
+    if (latestReportString) {
+        try {
+            latestReport = JSON.parse(latestReportString);
+        } catch (e) {
+            console.error("Failed to parse profiling report JSON:", e);
+        }
+    }
 
     if (isLoading) {
         return <div>加载中...</div>;
@@ -96,7 +108,7 @@ const DataSourceDetail = () => {
             {latestReport && (
                 <div style={{ marginTop: '20px' }}>
                     <h3>分析报告</h3>
-                    <ProfilingReport reportData={latestReport} />
+                    <ProfilingReport report={latestReport} />
                 </div>
             )}
         </div>

@@ -29,11 +29,16 @@ const LoginPage = () => {
     setError('');
 
     try {
-      await login(formData.username, formData.password);
-      navigate('/dashboard');
+      const result = await login(formData.username, formData.password);
+      if (!result.success) {
+        setError(result.message || '用户名或密码错误，请重试');
+      }
+      // The navigation is now handled inside the AuthContext upon successful login
     } catch (err) {
-      console.error('登录失败:', err);
-      setError('用户名或密码错误，请重试');
+      // This catch block might now be for unexpected errors during the login process itself,
+      // though most API errors are handled within the AuthContext's login function.
+      console.error('登录流程中发生意外错误:', err);
+      setError('发生意外错误，请稍后重试');
     } finally {
       setLoading(false);
     }
