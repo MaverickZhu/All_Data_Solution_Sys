@@ -23,6 +23,8 @@ const ProjectDetailPage = () => {
       const projectResponse = await getProject(projectId);
       const dataSourcesResponse = await getDataSources(projectId);
       
+      // 数据获取成功
+      
       setProject(projectResponse.data);
       setDataSources(dataSourcesResponse.data);
       setError(null);
@@ -196,7 +198,7 @@ const ProjectDetailPage = () => {
                       <div>
                         <div className="flex justify-between items-start mb-4">
                           <h4 className="text-lg font-bold text-gray-900 pr-4 break-all group-hover:text-blue-600 transition-colors">{dataSource.name}</h4>
-                          {getStatusChip(dataSource.profiling_status)}
+                          {getStatusChip(dataSource.profile_status)}
                         </div>
                         
                         <div className="mt-4 space-y-3 text-sm border-t border-gray-200 pt-4">

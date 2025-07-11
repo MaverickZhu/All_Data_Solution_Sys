@@ -94,16 +94,16 @@ export const deleteProject = (projectId) => apiClient.delete(`/projects/${projec
 export const getCurrentUser = () => apiClient.get('/users/me');
 
 // Data Sources
-export const getDataSources = (projectId) => apiClient.get(`/projects/${projectId}/datasources/`);
+export const getDataSources = (projectId) => apiClient.get(`/projects/${projectId}/data_sources`);
 export const getDataSourceDetail = (projectId, dataSourceId) => {
-    return apiClient.get(`/projects/${projectId}/datasources/${dataSourceId}`);
+    return apiClient.get(`/projects/${projectId}/data_sources/${dataSourceId}`);
 };
 
 export const uploadDataSource = (projectId, file) => {
     const formData = new FormData();
     formData.append('file', file);
     
-    return apiClient.post(`/projects/${projectId}/datasources/`, formData, {
+    return apiClient.post(`/projects/${projectId}/data_sources`, formData, {
         headers: {
             ...apiClient.defaults.headers.common, // 保留通用头
             'Content-Type': 'multipart/form-data', // 设置特定的Content-Type
@@ -113,7 +113,7 @@ export const uploadDataSource = (projectId, file) => {
 };
 
 export const deleteDataSource = (projectId, dataSourceId) => {
-    return apiClient.delete(`/projects/${projectId}/datasources/${dataSourceId}`);
+    return apiClient.delete(`/projects/${projectId}/data_sources/${dataSourceId}`);
 };
 
 // Search
