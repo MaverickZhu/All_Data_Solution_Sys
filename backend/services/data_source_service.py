@@ -19,8 +19,30 @@ from backend.core.exceptions import NotFoundException, AuthorizationException
 from backend.core.config import settings
 from backend.models.user import User
 from backend.services.mongo_service import mongo_service
+from backend.models.data_source import AnalysisCategory
+import mimetypes
+import uuid
 
 logger = logging.getLogger("service")
+
+def get_file_extension(filename: str) -> str:
+    return filename.split(".")[-1] if "." in filename else ""
+
+def get_analysis_category(file_type: str) -> AnalysisCategory:
+    # A more robust mapping can be implemented here
+    text_based = ["txt", "md", "pdf", "docx", "py", "js", "html", "css", "json", "xml", "csv"]
+    image_based = ["jpg", "jpeg", "png", "gif", "bmp", "tiff"]
+    tabular_based = ["csv", "xls", "xlsx"] # Note: csv is in both text and tabular
+
+    if file_type in tabular_based:
+        return AnalysisCategory.TABULAR
+    if file_type in image_based:
+        return AnalysisCategory.IMAGE
+    if file_type in text_based:
+        return AnalysisCategory.TEXTUAL
+    
+    return AnalysisCategory.UNSTRUCTURED
+
 
 class DataSourceService:
     
@@ -41,7 +63,7 @@ class DataSourceService:
         await db.refresh(ds)
         
         # Then, aggregate data from MongoDB for text-based analysis results
-        if ds.data_source_type in [DataSourceType.TXT, DataSourceType.CSV, DataSourceType.JSON]:
+        if ds.analysis_category == AnalysisCategory.TEXTUAL:
             analysis_results = mongo_service.get_text_analysis_results(ds.id)
             if analysis_results:
                 # Dynamically add the analysis results to the response object
@@ -64,90 +86,70 @@ class DataSourceService:
 
     @staticmethod
     async def create_data_source_from_upload(
-        db: AsyncSession, 
-        project: Project, 
-        upload_file: UploadFile,
-        current_user: User
+        db: AsyncSession, project: Project, upload_file: UploadFile, current_user: User
     ) -> DataSource:
-        """从上传的文件创建数据源"""
-        logger.debug(f"Starting to process file upload: {upload_file.filename} for project ID: {project.id}")
-        
-        try:
-            # 1. 保存文件到磁盘
-            project_upload_dir = DataSourceService.BASE_UPLOAD_DIR / str(project.id)
-            project_upload_dir.mkdir(parents=True, exist_ok=True)
-            logger.debug(f"Upload directory prepared: {project_upload_dir}")
-            
-            file_path = project_upload_dir / upload_file.filename
-            
-            try:
-                with file_path.open("wb") as buffer:
-                    shutil.copyfileobj(upload_file.file, buffer)
-                logger.info(f"File saved successfully to {file_path}", extra={"file_path": str(file_path)})
-            finally:
-                upload_file.file.close()
+        """
+        Creates a new DataSource from an uploaded file and saves it to the database.
+        """
+        # 恢复原有的按项目分目录存储方式
+        project_upload_dir = Path(settings.upload_dir) / str(project.id)
+        project_upload_dir.mkdir(parents=True, exist_ok=True)
 
-            # 2. 创建数据库记录
+        sanitized_filename = "".join(
+            c for c in upload_file.filename if c.isalnum() or c in (".", "_", "-")
+        ).strip()
+        unique_filename = f"{uuid.uuid4()}_{sanitized_filename}"
+        file_path = project_upload_dir / unique_filename
+
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(upload_file.file, buffer)
+
             file_size = file_path.stat().st_size
-            file_extension = file_path.suffix.lstrip('.').lower()
-            logger.debug(f"File size: {file_size}, extension: {file_extension}")
-            
-            # 新增：扩展名到枚举的映射
-            extension_to_type_map = {
-                'csv': DataSourceType.CSV,
-                'json': DataSourceType.JSON,
-                'txt': DataSourceType.TXT,
-                'md': DataSourceType.TXT, # 将Markdown也视为纯文本类型
-                'pdf': DataSourceType.PDF,
-                'jpg': DataSourceType.IMAGE,
-                'jpeg': DataSourceType.IMAGE,
-                'png': DataSourceType.IMAGE,
-                'docx': DataSourceType.TXT, # Alembic迁移失败，回退到将DOCX视为TXT处理
-            }
-            
-            # 确保使用正确的枚举值（小写）
-            ds_type = extension_to_type_map.get(file_extension, DataSourceType.UNKNOWN)
-            if ds_type == DataSourceType.UNKNOWN:
-                logger.warning(
-                    f"Unknown file type: '{file_extension}', defaulting to UNKNOWN.",
-                    extra={"file_extension": file_extension}
-                )
+            file_extension = get_file_extension(sanitized_filename)
+            analysis_cat = get_analysis_category(file_extension)
 
             db_ds = DataSource(
-                name=upload_file.filename,
-                project_id=project.id,
-                data_source_type=ds_type,
-                file_path=str(file_path.relative_to(DataSourceService.BASE_UPLOAD_DIR)),
+                name=sanitized_filename,
+                file_path=f"{project.id}/{unique_filename}",  # 使用原有的格式：项目ID/文件名
                 file_size=file_size,
+                file_type=file_extension,
+                analysis_category=analysis_cat,
                 profile_status=ProfileStatusEnum.pending,
-                uploaded_at=datetime.now(timezone.utc),
+                project_id=project.id,
                 user_id=current_user.id,
-                created_by=current_user.username
+                created_by=current_user.username,
+                uploaded_at=datetime.now(timezone.utc)
             )
 
-            logger.debug(f"DataSource object created, type: {db_ds.data_source_type}")
-            
             db.add(db_ds)
             await db.commit()
             await db.refresh(db_ds)
-            
-            logger.info(f"Data source record created in DB with ID: {db_ds.id}", extra={"data_source_id": db_ds.id})
 
-            # 再次刷新以确保所有字段都已从数据库加载
-            await db.refresh(db_ds)
+            logger.info(f"Successfully created data source '{db_ds.name}' (ID: {db_ds.id}) in project {project.id}")
             return db_ds
-            
+
         except Exception as e:
-            logger.error(f"Failed to create data source from upload: {e}", exc_info=True)
-            # Raise a more specific internal exception or re-raise
-            raise
+            # Clean up the saved file if an error occurs
+            if file_path.exists():
+                os.remove(file_path)
+            logger.error(
+                f"Failed to create data source for file '{upload_file.filename}' in project {project.id}. Error: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to save or process the uploaded file.",
+            )
+        finally:
+            upload_file.file.close()
 
     @staticmethod
     async def delete_data_source(db: AsyncSession, ds: DataSource) -> None:
         """Deletes a data source object and its associated file."""
         # 1. Delete the file from disk
         try:
-            file_to_delete = DataSourceService.BASE_UPLOAD_DIR / ds.file_path
+            file_to_delete = Path(settings.upload_dir) / ds.file_path
             if file_to_delete.exists():
                 os.remove(file_to_delete)
                 logger.info(f"Successfully deleted file: {file_to_delete}")

@@ -374,29 +374,29 @@ def run_profiling_task(self, data_source_id: int):
     db.commit()
 
     try:
-        file_path = Path(settings.UPLOADS_DIR) / data_source.file_path
-        logger.info(f"Processing file: {file_path} of type {data_source.data_source_type}")
+        file_path = Path(settings.upload_dir) / data_source.file_path
+        logger.info(f"Processing file: {file_path} of type {data_source.file_type}")
 
         profile_result = {}
         text_content_for_analysis = ""
 
         # Extended text-based file handling
-        if data_source.data_source_type in ['csv', 'txt', 'docx', 'pdf', 'md']:
+        if data_source.file_type in ['csv', 'txt', 'docx', 'pdf', 'md']:
             if not file_path.exists():
                 raise FileNotFoundError(f"File not found at {file_path}")
 
-            if data_source.data_source_type == 'docx':
+            if data_source.file_type == 'docx':
                 text_content_for_analysis = extract_text_from_docx(file_path)
-            elif data_source.data_source_type == 'pdf':
+            elif data_source.file_type == 'pdf':
                 text_content_for_analysis = extract_text_from_pdf(file_path)
-            elif data_source.data_source_type == 'md':
+            elif data_source.file_type == 'md':
                 text_content_for_analysis = extract_text_from_md(file_path)
-            elif data_source.data_source_type == 'csv':
+            elif data_source.file_type == 'csv':
                 df = pd.read_csv(file_path)
                 # For CSV, we'll use the first column for text analysis by default
                 if not df.empty:
                     text_content_for_analysis = " ".join(df.iloc[:, 0].astype(str).tolist())
-            elif data_source.data_source_type == 'txt':
+            elif data_source.file_type == 'txt':
                 text_content_for_analysis = file_path.read_text(encoding='utf-8')
 
             if text_content_for_analysis:
@@ -407,20 +407,20 @@ def run_profiling_task(self, data_source_id: int):
                 logger.warning(f"No text content extracted from {file_path}. Skipping text analysis.")
 
         # Image file handling
-        elif data_source.data_source_type in ['jpg', 'jpeg', 'png']:
+        elif data_source.file_type in ['jpg', 'jpeg', 'png']:
             profile_result = perform_image_analysis(file_path)
         
         else:
-            logger.warning(f"Unsupported data source type: {data_source.data_source_type}")
-            raise ValueError(f"Unsupported file type: {data_source.data_source_type}")
+            logger.warning(f"Unsupported data source type: {data_source.file_type}")
+            raise ValueError(f"Unsupported file type: {data_source.file_type}")
 
         # --- Step 3: Save results to the database ---
         if profile_result:
             # For text analysis, save to MongoDB
-            if data_source.data_source_type == 'txt':
+            if data_source.file_type == 'txt':
                  mongo_service.save_text_analysis_results(data_source_id, profile_result)
             
-            if data_source.data_source_type in ['jpg', 'jpeg', 'png'] and "error" not in profile_result:
+            if data_source.file_type in ['jpg', 'jpeg', 'png'] and "error" not in profile_result:
                 data_source.image_hash = profile_result.get("image_hash")
             
             data_source.profiling_result = profile_result

@@ -202,7 +202,7 @@ const ProjectDetailPage = () => {
                         <div className="mt-4 space-y-3 text-sm border-t border-gray-200 pt-4">
                           <div className="flex items-center justify-between text-gray-800">
                             <span className="flex items-center gap-2 text-gray-500"><TagIcon className="h-4 w-4"/>类型</span>
-                            <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{dataSource.data_source_type}</span>
+                                                            <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{dataSource.file_type || 'unknown'}</span>
                           </div>
                            <div className="flex items-center justify-between text-gray-800">
                             <span className="flex items-center gap-2 text-gray-500"><DatabaseIcon className="h-4 w-4"/>文件大小</span>

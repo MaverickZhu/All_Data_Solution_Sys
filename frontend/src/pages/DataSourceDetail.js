@@ -160,7 +160,8 @@ const DataSourceDetail = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 border-t border-white/10 pt-6">
                             <InfoItem label="数据源ID" value={dataSource.id} />
-                            <InfoItem label="文件类型" value={dataSource.data_source_type.toUpperCase()} />
+                            <InfoItem label="文件类型" value={dataSource.file_type?.toUpperCase() || 'UNKNOWN'} />
+                            <InfoItem label="分析类别" value={dataSource.analysis_category || 'UNSTRUCTURED'} />
                             <InfoItem label="文件大小" value={formatFileSize(dataSource.file_size)} />
                             <InfoItem label="上传时间" value={formatDate(dataSource.uploaded_at || dataSource.created_at)} />
                         </div>

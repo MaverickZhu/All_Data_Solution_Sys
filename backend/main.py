@@ -116,11 +116,11 @@ async def combined_middleware(request: Request, call_next):
                 }
             }
         )
-
+    
     # 2. 设置请求ID和日志
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request_id_var.set(request_id)
-    
+
     start_time = time.time()
     
     logger.info(

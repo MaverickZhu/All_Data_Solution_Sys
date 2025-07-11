@@ -16,7 +16,7 @@ class MongoService:
         """Initializes and returns the database connection."""
         if cls._client is None:
             try:
-                cls._client = MongoClient(settings.MONGODB_URL)
+                cls._client = MongoClient(settings.mongodb_url)
                 cls._db = cls._client.get_database("multimodal_analysis")
                 logger.info("Successfully connected to MongoDB.")
             except Exception as e:
