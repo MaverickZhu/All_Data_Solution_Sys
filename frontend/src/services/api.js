@@ -33,10 +33,12 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Also handle token expiration here if needed, e.g., redirect to login
+    // Handle token expiration and unauthorized access
     if (error.response && error.response.status === 401) {
-      // localStorage.removeItem('token');
-      // window.location = '/login';
+      console.warn('Authentication failed, clearing token and redirecting to login');
+      localStorage.removeItem('token');
+      // Use window.location.href for better compatibility
+      window.location.href = '/login';
     }
     return Promise.reject(error);
   }

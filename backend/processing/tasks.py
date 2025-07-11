@@ -36,7 +36,7 @@ from sumy.nlp.stemmers import Stemmer
 
 from backend.core.celery_app import celery_app
 from backend.core.database import get_sync_db
-from backend.models.data_source import DataSource, ProfileStatusEnum
+from backend.models.data_source import DataSource, ProfileStatusEnum, AnalysisCategory
 from backend.core.config import settings
 from backend.semantic_processing.embedding_service import EmbeddingService
 from backend.services.mongo_service import mongo_service
@@ -285,6 +285,178 @@ def perform_text_analysis(df: pd.DataFrame) -> dict:
         }
     }
 
+def perform_tabular_analysis(df: pd.DataFrame) -> dict:
+    """
+    Performs comprehensive tabular data analysis on a DataFrame.
+    Returns detailed statistical analysis and data profiling.
+    """
+    try:
+        logger.info(f"Starting tabular analysis for DataFrame with shape {df.shape}")
+        
+        # Basic DataFrame information
+        basic_info = {
+            "rows": int(len(df)),
+            "columns": int(len(df.columns)),
+            "memory_usage": int(df.memory_usage(deep=True).sum()),
+            "dtypes": df.dtypes.astype(str).to_dict(),
+            "column_names": df.columns.tolist()
+        }
+        
+        # Data quality assessment
+        missing_values = {col: int(val) for col, val in df.isnull().sum().to_dict().items()}
+        missing_percentage = {col: float(val) for col, val in (df.isnull().sum() / len(df) * 100).round(2).to_dict().items()}
+        
+        data_quality = {
+            "missing_values": missing_values,
+            "missing_percentage": missing_percentage,
+            "duplicate_rows": int(df.duplicated().sum()),
+            "duplicate_percentage": round(float(df.duplicated().sum() / len(df) * 100), 2)
+        }
+        
+        # Column-wise analysis
+        column_analysis = {}
+        for col in df.columns:
+            col_data = df[col]
+            col_info = {
+                "dtype": str(col_data.dtype),
+                "non_null_count": int(col_data.count()),
+                "null_count": int(col_data.isnull().sum()),
+                "unique_count": int(col_data.nunique()),
+                "unique_percentage": round(float(col_data.nunique() / len(col_data) * 100), 2)
+            }
+            
+            # Numeric column analysis
+            if pd.api.types.is_numeric_dtype(col_data):
+                # Helper function to safely convert numeric values
+                def safe_numeric_convert(value):
+                    if pd.isna(value) or np.isnan(value) or np.isinf(value):
+                        return None
+                    return round(float(value), 3)
+                
+                col_info.update({
+                    "mean": safe_numeric_convert(col_data.mean()) if not col_data.empty else None,
+                    "median": safe_numeric_convert(col_data.median()) if not col_data.empty else None,
+                    "std": safe_numeric_convert(col_data.std()) if not col_data.empty else None,
+                    "min": convert_to_serializable(col_data.min()) if not col_data.empty else None,
+                    "max": convert_to_serializable(col_data.max()) if not col_data.empty else None,
+                    "quartiles": {
+                        "q25": safe_numeric_convert(col_data.quantile(0.25)) if not col_data.empty else None,
+                        "q75": safe_numeric_convert(col_data.quantile(0.75)) if not col_data.empty else None
+                    }
+                })
+            
+            # Text/categorical column analysis
+            elif pd.api.types.is_object_dtype(col_data):
+                # Get most common values (limit to prevent large results)
+                value_counts = col_data.value_counts().head(5)
+                most_common = {}
+                for k, v in value_counts.to_dict().items():
+                    # Truncate long strings to prevent JSON bloat
+                    key_str = str(k)
+                    if len(key_str) > 100:
+                        key_str = key_str[:97] + "..."
+                    most_common[key_str] = int(v)
+                
+                col_info.update({
+                    "most_common": most_common,
+                    "avg_length": round(float(col_data.astype(str).str.len().mean()), 2) if not col_data.empty else None,
+                    "max_length": int(col_data.astype(str).str.len().max()) if not col_data.empty else None,
+                    "min_length": int(col_data.astype(str).str.len().min()) if not col_data.empty else None
+                })
+            
+            column_analysis[col] = col_info
+        
+        # Data type distribution
+        dtype_counts = df.dtypes.value_counts().to_dict()
+        dtype_distribution = {str(k): int(v) for k, v in dtype_counts.items()}
+        
+        # Generate insights
+        insights = []
+        
+        # Missing data insights
+        high_missing_cols = [col for col, pct in data_quality["missing_percentage"].items() if pct > 50]
+        if high_missing_cols:
+            insights.append(f"警告：以下列缺失数据超过50%: {', '.join(high_missing_cols)}")
+        
+        # Duplicate data insights
+        if data_quality["duplicate_percentage"] > 10:
+            insights.append(f"警告：发现{data_quality['duplicate_percentage']}%的重复行")
+        
+        # High cardinality insights
+        high_cardinality_cols = [col for col, info in column_analysis.items() 
+                               if info["unique_percentage"] > 95 and info["unique_count"] > 10]
+        if high_cardinality_cols:
+            insights.append(f"注意：以下列具有高基数（可能是ID列）: {', '.join(high_cardinality_cols)}")
+        
+        # Numeric vs categorical balance
+        numeric_cols = len([col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])])
+        categorical_cols = len(df.columns) - numeric_cols
+        insights.append(f"数据结构：{numeric_cols}个数值列，{categorical_cols}个分类列")
+        
+        result = {
+            "analysis_type": "tabular",
+            "basic_info": basic_info,
+            "data_quality": data_quality,
+            "column_analysis": column_analysis,
+            "dtype_distribution": dtype_distribution,
+            "insights": insights,
+            "analysis_quality": {
+                "completeness": "high" if data_quality["missing_percentage"] else "partial",
+                "columns_analyzed": len(column_analysis),
+                "total_insights": len(insights)
+            }
+        }
+        
+        logger.info(f"Tabular analysis completed successfully. Generated {len(insights)} insights.")
+        
+        # Check result size and optimize if necessary
+        result_json = json.dumps(result, ensure_ascii=False)
+        if len(result_json) > 50000:  # 50KB limit
+            logger.warning(f"Analysis result is large ({len(result_json)} chars), optimizing...")
+            # Reduce column analysis detail for large datasets
+            optimized_column_analysis = {}
+            for col_name, col_data in result["column_analysis"].items():
+                optimized_col_data = {
+                    "dtype": col_data["dtype"],
+                    "non_null_count": col_data["non_null_count"],
+                    "null_count": col_data["null_count"],
+                    "unique_count": col_data["unique_count"],
+                    "unique_percentage": col_data["unique_percentage"]
+                }
+                # Add essential stats for numeric columns
+                if col_data.get("mean") is not None:
+                    optimized_col_data.update({
+                        "mean": col_data["mean"],
+                        "median": col_data["median"],
+                        "std": col_data["std"],
+                        "min": col_data["min"],
+                        "max": col_data["max"]
+                    })
+                # Add top 3 most common for categorical columns
+                if col_data.get("most_common"):
+                    top_3_common = dict(list(col_data["most_common"].items())[:3])
+                    optimized_col_data["most_common"] = top_3_common
+                
+                optimized_column_analysis[col_name] = optimized_col_data
+            
+            result["column_analysis"] = optimized_column_analysis
+            result["optimization_applied"] = True
+            logger.info("Analysis result optimized for storage.")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Tabular analysis failed: {e}", exc_info=True)
+        return {
+            "analysis_type": "tabular",
+            "error": "表格分析失败",
+            "details": str(e),
+            "basic_info": {
+                "rows": len(df) if df is not None else 0,
+                "columns": len(df.columns) if df is not None else 0
+            }
+        }
+
 def perform_image_analysis(image_path: Path) -> dict:
     """
     Performs basic image analysis, generating a perceptual hash.
@@ -314,6 +486,9 @@ def convert_to_serializable(obj):
     if isinstance(obj, (np.integer, np.int64)):
         return int(obj)
     elif isinstance(obj, (np.floating, np.float64)):
+        # Handle NaN and infinity values
+        if np.isnan(obj) or np.isinf(obj):
+            return None
         return float(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
@@ -380,8 +555,9 @@ def run_profiling_task(self, data_source_id: int):
         profile_result = {}
         text_content_for_analysis = ""
 
-        # Extended text-based file handling
-        if data_source.file_type in ['csv', 'txt', 'docx', 'pdf', 'md']:
+        # Handle different analysis categories
+        if data_source.analysis_category == AnalysisCategory.TEXTUAL:
+            # Text-based file handling
             if not file_path.exists():
                 raise FileNotFoundError(f"File not found at {file_path}")
 
@@ -391,13 +567,11 @@ def run_profiling_task(self, data_source_id: int):
                 text_content_for_analysis = extract_text_from_pdf(file_path)
             elif data_source.file_type == 'md':
                 text_content_for_analysis = extract_text_from_md(file_path)
-            elif data_source.file_type == 'csv':
-                df = pd.read_csv(file_path)
-                # For CSV, we'll use the first column for text analysis by default
-                if not df.empty:
-                    text_content_for_analysis = " ".join(df.iloc[:, 0].astype(str).tolist())
             elif data_source.file_type == 'txt':
                 text_content_for_analysis = file_path.read_text(encoding='utf-8')
+            else:
+                logger.warning(f"Unsupported text file type: {data_source.file_type}")
+                text_content_for_analysis = ""
 
             if text_content_for_analysis:
                 # We need to wrap the text content in a DataFrame for perform_text_analysis
@@ -406,21 +580,40 @@ def run_profiling_task(self, data_source_id: int):
             else:
                 logger.warning(f"No text content extracted from {file_path}. Skipping text analysis.")
 
-        # Image file handling
-        elif data_source.file_type in ['jpg', 'jpeg', 'png']:
-            profile_result = perform_image_analysis(file_path)
+        elif data_source.analysis_category == AnalysisCategory.TABULAR:
+            # Tabular data handling (CSV files)
+            if not file_path.exists():
+                raise FileNotFoundError(f"File not found at {file_path}")
+            
+            if data_source.file_type == 'csv':
+                df = pd.read_csv(file_path)
+                profile_result = perform_tabular_analysis(df)
+            else:
+                logger.warning(f"Unsupported tabular file type: {data_source.file_type}")
+                profile_result = {"error": f"Unsupported tabular file type: {data_source.file_type}"}
+
+        elif data_source.analysis_category == AnalysisCategory.IMAGE:
+            # Image file handling
+            if data_source.file_type in ['jpg', 'jpeg', 'png']:
+                profile_result = perform_image_analysis(file_path)
+            else:
+                logger.warning(f"Unsupported image file type: {data_source.file_type}")
+                profile_result = {"error": f"Unsupported image file type: {data_source.file_type}"}
         
         else:
-            logger.warning(f"Unsupported data source type: {data_source.file_type}")
-            raise ValueError(f"Unsupported file type: {data_source.file_type}")
+            logger.warning(f"Unsupported analysis category: {data_source.analysis_category}")
+            raise ValueError(f"Unsupported analysis category: {data_source.analysis_category}")
 
         # --- Step 3: Save results to the database ---
         if profile_result:
-            # For text analysis, save to MongoDB
-            if data_source.file_type == 'txt':
-                 mongo_service.save_text_analysis_results(data_source_id, profile_result)
+            # Save analysis results to MongoDB based on analysis type
+            if data_source.analysis_category == AnalysisCategory.TEXTUAL and "error" not in profile_result:
+                mongo_service.save_text_analysis_results(data_source_id, profile_result)
+            elif data_source.analysis_category == AnalysisCategory.TABULAR and "error" not in profile_result:
+                mongo_service.save_tabular_analysis_results(data_source_id, profile_result)
             
-            if data_source.file_type in ['jpg', 'jpeg', 'png'] and "error" not in profile_result:
+            # For image analysis, save image hash to the main database
+            if data_source.analysis_category == AnalysisCategory.IMAGE and "error" not in profile_result:
                 data_source.image_hash = profile_result.get("image_hash")
             
             data_source.profiling_result = profile_result
