@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "echarts": "^5.6.0",
+    "echarts-for-react": "^3.0.2",
+    "react-joyride": "^2.9.3"
+  }
+}
