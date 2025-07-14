@@ -4,6 +4,7 @@
 """
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime, timezone
 
@@ -125,6 +126,20 @@ class UserService:
         return result.scalar_one_or_none()
     
     @staticmethod
+    def get_user_by_username_sync(db: Session, username: str) -> Optional[User]:
+        """
+        通过用户名获取用户 (同步版本)
+        """
+        return db.query(User).filter(User.username == username, User.is_deleted == False).first()
+
+    @staticmethod
+    def get_user_by_email_sync(db: Session, email: str) -> Optional[User]:
+        """
+        通过邮箱获取用户 (同步版本)
+        """
+        return db.query(User).filter(User.email == email, User.is_deleted == False).first()
+
+    @staticmethod
     async def authenticate_user(db: AsyncSession, username: str, password: str) -> Optional[User]:
         """
         验证用户身份
@@ -141,6 +156,35 @@ class UserService:
         if not user:
             # 也尝试通过邮箱登录 (修正拼写错误)
             user = await UserService.get_user_by_email(db, username)
+        
+        if not user:
+            return None
+        
+        if not verify_password(password, user.hashed_password):
+            return None
+        
+        if not user.is_active:
+            return None
+        
+        return user
+
+    @staticmethod
+    def authenticate_user_sync(db: Session, username: str, password: str) -> Optional[User]:
+        """
+        验证用户身份 (同步版本)
+        
+        Args:
+            db: 同步数据库会话
+            username: 用户名
+            password: 密码
+            
+        Returns:
+            验证成功返回用户对象，否则返回None
+        """
+        user = UserService.get_user_by_username_sync(db, username)
+        if not user:
+            # 也尝试通过邮箱登录
+            user = UserService.get_user_by_email_sync(db, username)
         
         if not user:
             return None

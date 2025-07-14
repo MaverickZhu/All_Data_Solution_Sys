@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8008';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8088';
 
 const apiClient = axios.create({
   baseURL: `${API_URL}/api/v1`,
@@ -79,9 +79,21 @@ export const login = (username, password) => {
     formData.append('username', username);
     formData.append('password', password);
 
-    // Use the global apiClient so that interceptors are applied.
-    return apiClient.post(`/auth/token`, formData, {
+    // Create a separate axios instance for the login request to avoid header conflicts.
+    const loginAxios = axios.create({
+        baseURL: `${API_URL}/api/v1`,
+    });
+
+    return loginAxios.post('/auth/token', formData, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }).then(response => {
+        // After a successful login, manually save the token to localStorage.
+        // This is necessary because we are not using the global apiClient with its interceptors.
+        if (response.data && response.data.access_token) {
+            localStorage.setItem('token', response.data.access_token);
+        }
+        // Return the original response to maintain the promise chain.
+        return response;
     });
 };
 

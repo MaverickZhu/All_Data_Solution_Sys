@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import EChartsVisualization from './EChartsVisualization';
+import ImageAnalysisReport from './ImageAnalysisReport';
 
 
 const StatCard = ({ label, value, icon, className = '' }) => (
@@ -320,9 +321,12 @@ const ProfilingReport = ({ report, dataSource }) => {
 
   const isTextFile = report.analysis_type === 'text';
   const isTabularFile = report.analysis_type === 'tabular';
+  const isImageFile = report.analysis_type === 'image';
   const tableStats = report.table;
   const tabularStats = report.basic_info;
   const textStats = report.text_stats;
+
+
 
   return (
     <div className="space-y-8 text-slate-200">
@@ -364,6 +368,15 @@ const ProfilingReport = ({ report, dataSource }) => {
             <StatCard label="重复行数" value={report.data_quality?.duplicate_rows?.toLocaleString() ?? 'N/A'} />
             <StatCard label="重复率" value={report.data_quality?.duplicate_percentage != null ? report.data_quality.duplicate_percentage.toFixed(2) + '%' : 'N/A'} />
           </div>
+        ) : isImageFile && report.image_properties ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard label="宽度" value={report.image_properties.dimensions ? `${report.image_properties.dimensions.width} px` : 'N/A'} />
+            <StatCard label="高度" value={report.image_properties.dimensions ? `${report.image_properties.dimensions.height} px` : 'N/A'} />
+            <StatCard label="文件大小" value={report.image_properties.file_size_bytes ? `${(report.image_properties.file_size_bytes / 1024).toFixed(2)} KB` : 'N/A'} />
+            <StatCard label="图像格式" value={report.image_properties.format ?? 'N/A'} />
+            <StatCard label="颜色模式" value={report.image_properties.mode ?? 'N/A'} />
+            <StatCard label="感知哈希" value={report.image_properties.phash ?? 'N/A'} />
+          </div>
         ) : tableStats ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard label="变量数量" value={tableStats.n_var ?? 'N/A'} />
@@ -375,8 +388,15 @@ const ProfilingReport = ({ report, dataSource }) => {
         ) : (
             <p className='text-slate-400'>数据概览信息不可用。</p>
         )}
-      </Section>
-      
+            </Section>
+
+      {/* --- Image Analysis --- */}
+      {isImageFile && (
+        <Section title="图像分析报告" icon={<span className="text-2xl">🖼️</span>}>
+          <ImageAnalysisReport result={report} filePath={dataSource?.file_path} />
+        </Section>
+      )}
+
       {/* --- Text Analysis --- */}
       {isTextFile && (
         <Section title="文本智能分析" icon={<span className="text-2xl">📄</span>}>

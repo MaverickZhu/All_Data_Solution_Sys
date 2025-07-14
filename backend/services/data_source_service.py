@@ -121,14 +121,14 @@ class DataSourceService:
                 created_by=current_user.username,
                 uploaded_at=datetime.now(timezone.utc)
             )
-
+            
             db.add(db_ds)
             await db.commit()
             await db.refresh(db_ds)
-
+            
             logger.info(f"Successfully created data source '{db_ds.name}' (ID: {db_ds.id}) in project {project.id}")
             return db_ds
-
+            
         except Exception as e:
             # Clean up the saved file if an error occurs
             if file_path.exists():

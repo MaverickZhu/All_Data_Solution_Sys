@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     neo4j_password: str = Field("password123", validation_alias=AliasChoices("neo4j_password", "NEO4J_PASSWORD"))
     
     # CORS配置
-    cors_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:8000", "http://localhost:3001"], validation_alias=AliasChoices("cors_origins", "CORS_ORIGINS"))
+    cors_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:8000", "http://localhost:3001", "http://localhost:3080"], validation_alias=AliasChoices("cors_origins", "CORS_ORIGINS"))
     
     # 日志配置
     log_level: str = Field("INFO", validation_alias=AliasChoices("log_level", "LOG_LEVEL"))

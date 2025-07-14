@@ -54,8 +54,11 @@ AsyncSessionLocal = async_sessionmaker(
 # 声明所有模型的基础类
 Base = declarative_base()
 
-# 同步数据库引擎和会话工厂 (为Celery任务准备)
-sync_engine = create_engine(settings.sync_database_url, echo=False)
+# 同步数据库引擎和会话工厂 (为Celery任务和同步端点准备)
+sync_engine = create_engine(
+    settings.database_url.replace("+asyncpg", ""),
+    echo=False
+)
 SyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
 

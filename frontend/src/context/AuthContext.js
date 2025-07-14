@@ -29,8 +29,8 @@ export const AuthProvider = ({ children }) => {
     }, [fetchUser]);
 
     const login = useCallback(async (email, password) => {
-        const response = await api.login(email, password);
-        localStorage.setItem('token', response.data.access_token);
+        await api.login(email, password);
+        // The token is now saved inside api.login(), so we just need to fetch the user.
         await fetchUser();
     }, [fetchUser]);
 

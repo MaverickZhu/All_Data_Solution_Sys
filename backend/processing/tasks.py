@@ -23,6 +23,8 @@ from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import docx
 import fitz  # PyMuPDF
 import pypandoc
+from sklearn.cluster import KMeans # 导入KMeans
+from PIL.ExifTags import TAGS # 导入TAGS用于解析EXIF
 
 # Explicitly add the NLTK data path defined in the Dockerfile
 # This ensures that NLTK looks for data in our specified location.
@@ -459,30 +461,91 @@ def perform_tabular_analysis(df: pd.DataFrame) -> dict:
 
 def perform_image_analysis(image_path: Path) -> dict:
     """
-    Performs basic image analysis, generating a perceptual hash.
+    Performs analysis on an image file.
+    
+    Args:
+        image_path: Path to the image file.
+        
+    Returns:
+        A dictionary containing analysis results like dimensions, format, phash,
+        dominant colors, and EXIF data.
     """
     try:
         with Image.open(image_path) as img:
-            img_hash = imagehash.phash(img)
-            return {
+            # 1. Basic properties
+            width, height = img.size
+            image_format = img.format
+            file_size = image_path.stat().st_size
+            
+            # 2. Perceptual Hash
+            try:
+                phash = str(imagehash.phash(img))
+            except Exception as e:
+                logger.warning(f"Could not compute phash for {image_path}: {e}")
+                phash = None
+
+            # 3. Dominant Colors (using KMeans)
+            try:
+                # Resize for faster processing
+                img_small = img.resize((100, 100))
+                # Convert to RGB if it's not
+                if img_small.mode != 'RGB':
+                    img_small = img_small.convert('RGB')
+                
+                pixels = np.array(img_small.getdata())
+                kmeans = KMeans(n_clusters=8, random_state=42, n_init=10).fit(pixels)
+                dominant_colors = [f"#{int(c[0]):02x}{int(c[1]):02x}{int(c[2]):02x}" for c in kmeans.cluster_centers_]
+            except Exception as e:
+                logger.warning(f"Could not determine dominant colors for {image_path}: {e}")
+                dominant_colors = []
+
+            # 4. EXIF Data
+            exif_data = {}
+            try:
+                if hasattr(img, '_getexif'):
+                    exif_info = img._getexif()
+                    if exif_info:
+                        for tag_id, value in exif_info.items():
+                            tag_name = TAGS.get(tag_id, tag_id)
+                            # To avoid issues with bytes, decode if possible
+                            if isinstance(value, bytes):
+                                try:
+                                    value = value.decode('utf-8', errors='ignore')
+                                except:
+                                    value = repr(value)
+                            exif_data[str(tag_name)] = str(value) # Ensure keys and values are strings
+            except Exception as e:
+                logger.warning(f"Could not extract EXIF data from {image_path}: {e}")
+
+            report = {
                 "analysis_type": "image",
-                "image_hash": str(img_hash),
-                "resolution": {
-                    "width": img.width,
-                    "height": img.height
-                },
-                "format": img.format
+                "image_properties": {
+                    "dimensions": {
+                        "width": width,
+                        "height": height
+                    },
+                    "format": img.format,
+                    "mode": img.mode,
+                    "file_size_bytes": file_size,
+                    "phash": phash,
+                    "dominant_colors": dominant_colors,
+                    "exif_data": exif_data,
+                }
             }
+
+            return report
+            
     except Exception as e:
-        logger.warning(f"Image analysis failed for {image_path}: {e}")
+        logger.error(f"Failed to analyze image {image_path}: {e}", exc_info=True)
         return {
-            "analysis_type": "image",
-            "error": "Failed to analyze image.",
-            "details": str(e)
+            "error": f"Failed to analyze image: {e}"
         }
 
+
 def convert_to_serializable(obj):
-    """Convert numpy/pandas types to Python native types for JSON serialization."""
+    """
+    Recursively converts non-serializable objects (like numpy types)
+    """
     if isinstance(obj, (np.integer, np.int64)):
         return int(obj)
     elif isinstance(obj, (np.floating, np.float64)):

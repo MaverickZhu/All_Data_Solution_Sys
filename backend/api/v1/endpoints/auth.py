@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from backend.services.user_service import UserService
 from backend.models.user import UserCreate, UserResponse, TokenResponse, UserLogin
 from backend.core import security
-from backend.core.database import get_db
+from backend.core.database import get_db, get_sync_db
 from backend.core.config import settings
 import logging
 
@@ -22,9 +22,9 @@ router = APIRouter()
 
 
 @router.post("/token", response_model=TokenResponse)
-async def login_for_access_token(
+def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     用户登录获取访问令牌
@@ -32,7 +32,7 @@ async def login_for_access_token(
     使用标准的OAuth2表单请求 (username & password)
     """
     # 验证用户
-    user = await UserService.authenticate_user(
+    user = UserService.authenticate_user_sync(
         db, 
         form_data.username, 
         form_data.password

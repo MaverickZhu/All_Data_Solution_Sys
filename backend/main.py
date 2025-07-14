@@ -9,8 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import time
 import uuid
+import os
 
 from starlette_prometheus import PrometheusMiddleware, metrics
 
@@ -19,6 +21,11 @@ from backend.core.exceptions import get_exception_handlers
 from backend.core.config import settings
 from backend.core.logging import setup_logging, logger, request_id_var
 from backend.api.v1.router import api_router
+
+# 显式地打印出当前加载的CORS源，用于调试
+import logging
+logging.basicConfig(level=logging.INFO)
+
 
 # 设置日志
 setup_logging()
@@ -204,6 +211,9 @@ async def health_check():
 # 包含v1的API路由
 app.include_router(api_router, prefix="/api/v1")
 
+# 挂载静态文件服务 - 用于提供上传的文件
+if os.path.exists(settings.upload_dir):
+    app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # 404处理器
 @app.exception_handler(404)
@@ -224,7 +234,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8088,
         reload=True,
         app_dir="." # 在直接运行时，当前目录就是backend
     )
