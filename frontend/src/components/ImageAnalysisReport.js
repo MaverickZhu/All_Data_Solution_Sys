@@ -34,8 +34,10 @@ const ImageAnalysisReport = ({ result, filePath }) => {
     }
 
     const { dimensions, file_size_bytes, dominant_colors, exif_data } = result.image_properties;
+    const intelligentAnalysis = result.intelligent_analysis || {};
     const imageUrl = `${API_URL}/uploads/${filePath}`;
     const hasExif = exif_data && Object.keys(exif_data).length > 0;
+    const hasIntelligentAnalysis = intelligentAnalysis.analysis_status === 'success';
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 text-slate-200">
@@ -58,6 +60,64 @@ const ImageAnalysisReport = ({ result, filePath }) => {
 
             {/* Right Column: Analysis Details */}
             <div className="lg:col-span-2 space-y-6">
+                {/* Intelligent Analysis */}
+                {hasIntelligentAnalysis && (
+                    <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-6 rounded-2xl border border-blue-500/20">
+                        <h4 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <span className="text-2xl">🤖</span>
+                            智能分析
+                        </h4>
+                        <div className="space-y-4">
+                            {/* Description */}
+                            <div className="bg-black/30 p-4 rounded-lg">
+                                <h5 className="text-sm font-medium text-sky-400 mb-2">图像描述</h5>
+                                <p className="text-white leading-relaxed">{intelligentAnalysis.description}</p>
+                            </div>
+                            
+                            {/* Scene Info Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <h5 className="text-sm font-medium text-sky-400 mb-2">场景类型</h5>
+                                    <p className="text-white">{intelligentAnalysis.scene_type}</p>
+                                </div>
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <h5 className="text-sm font-medium text-sky-400 mb-2">情感基调</h5>
+                                    <p className="text-white">{intelligentAnalysis.mood_tone}</p>
+                                </div>
+                            </div>
+                            
+                            {/* Suggested Tags */}
+                            {intelligentAnalysis.suggested_tags && intelligentAnalysis.suggested_tags.length > 0 && (
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <h5 className="text-sm font-medium text-sky-400 mb-2">建议标签</h5>
+                                    <div className="flex flex-wrap gap-2">
+                                        {intelligentAnalysis.suggested_tags.map((tag, index) => (
+                                            <span key={index} className="px-3 py-1 bg-sky-500/20 text-sky-300 rounded-full text-sm">
+                                                {tag}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Analysis Status for Failed Cases */}
+                {intelligentAnalysis.analysis_status === 'failed' && (
+                    <div className="bg-yellow-900/20 p-6 rounded-2xl border border-yellow-500/20">
+                        <h4 className="text-lg font-semibold text-yellow-400 mb-2 flex items-center gap-2">
+                            <span className="text-2xl">⚠️</span>
+                            智能分析状态
+                        </h4>
+                        <p className="text-yellow-300 mb-2">智能分析暂时不可用</p>
+                        <p className="text-yellow-200 text-sm">{intelligentAnalysis.description}</p>
+                        {intelligentAnalysis.error && (
+                            <p className="text-yellow-400 text-xs mt-2">错误: {intelligentAnalysis.error}</p>
+                        )}
+                    </div>
+                )}
+
                 {/* Dominant Colors */}
                 {dominant_colors && dominant_colors.length > 0 && (
                     <div className="bg-black/20 p-6 rounded-2xl border border-white/10">

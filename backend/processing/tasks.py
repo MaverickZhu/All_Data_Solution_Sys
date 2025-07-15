@@ -461,14 +461,14 @@ def perform_tabular_analysis(df: pd.DataFrame) -> dict:
 
 def perform_image_analysis(image_path: Path) -> dict:
     """
-    Performs analysis on an image file.
+    Performs comprehensive analysis on an image file.
     
     Args:
         image_path: Path to the image file.
         
     Returns:
         A dictionary containing analysis results like dimensions, format, phash,
-        dominant colors, and EXIF data.
+        dominant colors, EXIF data, and intelligent description.
     """
     try:
         with Image.open(image_path) as img:
@@ -517,6 +517,49 @@ def perform_image_analysis(image_path: Path) -> dict:
             except Exception as e:
                 logger.warning(f"Could not extract EXIF data from {image_path}: {e}")
 
+            # 5. Intelligent Description using Qwen2.5-VL
+            intelligent_analysis = {}
+            try:
+                from backend.services.image_description_service import ImageDescriptionService
+                import asyncio
+                
+                logger.info(f"Starting intelligent image analysis for {image_path}")
+                description_service = ImageDescriptionService()
+                
+                # 使用asyncio.run来运行异步函数
+                description_result = asyncio.run(description_service.generate_description(image_path))
+                
+                if description_result.get("success", False):
+                    intelligent_analysis = {
+                        "description": description_result.get("description", ""),
+                        "scene_type": description_result.get("parsed_analysis", {}).get("scene_type", "未知"),
+                        "mood_tone": description_result.get("parsed_analysis", {}).get("mood_tone", "中性"),
+                        "suggested_tags": description_result.get("parsed_analysis", {}).get("suggested_tags", []),
+                        "analysis_status": "success"
+                    }
+                    logger.info("Intelligent image analysis completed successfully")
+                else:
+                    intelligent_analysis = {
+                        "description": description_result.get("description", "无法生成图像描述"),
+                        "scene_type": "未知",
+                        "mood_tone": "中性",
+                        "suggested_tags": [],
+                        "analysis_status": "failed",
+                        "error": description_result.get("error", "未知错误")
+                    }
+                    logger.warning(f"Intelligent image analysis failed: {description_result.get('error', 'Unknown error')}")
+                    
+            except Exception as e:
+                logger.error(f"Error during intelligent image analysis: {e}", exc_info=True)
+                intelligent_analysis = {
+                    "description": "智能分析暂时不可用",
+                    "scene_type": "未知",
+                    "mood_tone": "中性",
+                    "suggested_tags": [],
+                    "analysis_status": "error",
+                    "error": str(e)
+                }
+
             report = {
                 "analysis_type": "image",
                 "image_properties": {
@@ -530,7 +573,8 @@ def perform_image_analysis(image_path: Path) -> dict:
                     "phash": phash,
                     "dominant_colors": dominant_colors,
                     "exif_data": exif_data,
-                }
+                },
+                "intelligent_analysis": intelligent_analysis
             }
 
             return report
