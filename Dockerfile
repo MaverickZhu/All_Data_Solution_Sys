@@ -1,49 +1,65 @@
-# Use an official Python runtime as a parent image
-FROM python:3.12-slim
+# Multi-stage build for better caching and smaller final image
+FROM python:3.12-slim as base
 
-# Set the working directory in the container
-WORKDIR /app
-
-# Install system dependencies for OpenCV, audio/video processing, and other libraries
+# Install system dependencies (rarely changes - good for caching)
 RUN apt-get update && apt-get install -y \
-    # OpenCV dependencies
+    ffmpeg \
+    wget \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
-    # Audio processing dependencies
     libsndfile1 \
-    ffmpeg \
-    # General utilities
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file into the container at /app
-COPY ./backend/requirements.txt /app/
+# Set working directory
+WORKDIR /app
 
-# Install build dependencies first, then project dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+# Stage 1: Python dependencies (cache this layer when requirements.txt doesn't change)
+FROM base as python-deps
+COPY ./backend/requirements.txt /app/
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# Install PyTorch with CUDA support (separate layer for better caching)
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Install other Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install --no-cache-dir jieba -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# Install NLTK data
-# We create a specific directory and download data there to ensure consistency.
-# This avoids potential issues with default NLTK search paths in different environments.
+# Stage 2: NLTK data (cache this layer)
+FROM python-deps as nltk-data
 ENV NLTK_DATA /usr/local/share/nltk_data
 RUN mkdir -p $NLTK_DATA && \
     python -m nltk.downloader -d $NLTK_DATA punkt stopwords vader_lexicon punkt_tab
 
-# Create a non-root user and switch to it
+# Stage 3: Whisper models (cache this layer - only changes when we want different models)
+FROM nltk-data as whisper-models
+RUN mkdir -p /root/.cache/whisper && \
+    echo "📥 Pre-downloading Whisper models for instant access..." && \
+    python -c "import whisper; import os; \
+    print('📥 Downloading Large V3 model...'); \
+    model = whisper.load_model('large-v3'); \
+    print('📥 Downloading Turbo backup model...'); \
+    model2 = whisper.load_model('turbo'); \
+    print('✅ All models successfully cached'); \
+    import glob; models = glob.glob('/root/.cache/whisper/*.pt'); \
+    [print(f'  ✓ {os.path.basename(m)}') for m in models]" && \
+    ls -la /root/.cache/whisper/
+
+# Final stage: Application code (this layer changes most frequently)
+FROM whisper-models as final
+
+# Create non-root user
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
-# Copy the backend folder into the container at /app
+# Copy application code (this layer will rebuild when code changes)
 COPY ./backend /app/backend
 
-# Set the PYTHONPATH to include the app directory, so that 'backend' can be imported
+# Set environment
 ENV PYTHONPATH "${PYTHONPATH}:/app"
-
-# Expose the port the app runs on
 EXPOSE 8008
 
-# Command to run the application will be specified in docker-compose 
+# Command will be specified in docker-compose 

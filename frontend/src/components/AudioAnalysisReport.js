@@ -216,27 +216,60 @@ const AudioAnalysisReport = ({ result }) => {
                     </div>
                 )}
 
-                {/* Speech Recognition Results */}
+                {/* Enhanced Speech Recognition Results */}
                 {speech_recognition && (
                     <div className="bg-gradient-to-r from-green-900/20 to-teal-900/20 p-6 rounded-2xl border border-green-500/20">
                         <h4 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                             <span className="text-2xl">🎤</span>
-                            语音识别结果
+                            智能语音识别结果
+                            {speech_recognition.performance_metrics && speech_recognition.performance_metrics.device_used === 'cuda' && (
+                                <span className="bg-green-500/20 text-green-300 px-2 py-1 rounded text-sm ml-2">
+                                    🚀 GPU加速
+                                </span>
+                            )}
+                            {speech_recognition.performance_metrics && speech_recognition.performance_metrics.transcription_time_seconds && (
+                                <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded text-sm ml-2">
+                                    ⚡ {speech_recognition.performance_metrics.transcription_time_seconds}s
+                                </span>
+                            )}
                         </h4>
                         
                         {speech_recognition.success ? (
-                            <div className="space-y-4">
-                                {/* Transcribed Text */}
+                            <div className="space-y-6">
+                                {/* Enhanced Transcribed Text */}
                                 {speech_recognition.transcribed_text && (
-                                    <div className="bg-black/30 p-4 rounded-lg">
-                                        <h5 className="text-sm font-medium text-green-400 mb-2">转录文本</h5>
-                                        <p className="text-slate-200 text-sm italic leading-relaxed border-l-2 border-green-500/30 pl-3">
-                                            "{speech_recognition.transcribed_text}"
-                                        </p>
+                                    <div className="bg-black/30 p-5 rounded-lg border border-green-500/20">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h5 className="text-sm font-medium text-green-400">增强转录文本</h5>
+                                            {speech_recognition.enhancement_info?.enhancement_successful && (
+                                                <span className="text-xs bg-green-600/20 text-green-300 px-2 py-1 rounded-full">
+                                                    ✨ AI增强
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-slate-200 text-sm leading-relaxed border-l-2 border-green-500/30 pl-4">
+                                            {speech_recognition.transcribed_text.split('\n').map((line, index) => (
+                                                <p key={index} className="mb-2 last:mb-0">
+                                                    {line.trim() && `"${line.trim()}"`}
+                                                </p>
+                                            ))}
+                                        </div>
+                                        
+                                        {/* Show original text comparison if enhanced */}
+                                        {speech_recognition.raw_text && speech_recognition.raw_text !== speech_recognition.transcribed_text && (
+                                            <details className="mt-4">
+                                                <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300">
+                                                    查看原始识别文本
+                                                </summary>
+                                                <div className="mt-2 p-3 bg-slate-800/50 rounded text-xs text-slate-400 border-l-2 border-slate-600 pl-3">
+                                                    "{speech_recognition.raw_text}"
+                                                </div>
+                                            </details>
+                                        )}
                                     </div>
                                 )}
                                 
-                                {/* Recognition Details */}
+                                {/* Enhanced Recognition Metrics */}
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                                     {speech_recognition.confidence !== undefined && (
                                         <div className="bg-slate-800/50 p-3 rounded-lg text-center">
@@ -280,6 +313,87 @@ const AudioAnalysisReport = ({ result }) => {
                                         </div>
                                     )}
                                 </div>
+                                
+                                {/* Confidence Distribution */}
+                                {speech_recognition.confidence_distribution && (
+                                    <div className="bg-black/20 p-4 rounded-lg mt-4">
+                                        <h5 className="text-sm font-medium text-slate-300 mb-3">置信度分布</h5>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div className="bg-green-600/20 p-3 rounded text-center">
+                                                <div className="text-lg font-bold text-green-300">
+                                                    {speech_recognition.confidence_distribution.high || 0}
+                                                </div>
+                                                <div className="text-xs text-green-400">高置信度段</div>
+                                            </div>
+                                            <div className="bg-yellow-600/20 p-3 rounded text-center">
+                                                <div className="text-lg font-bold text-yellow-300">
+                                                    {speech_recognition.confidence_distribution.medium || 0}
+                                                </div>
+                                                <div className="text-xs text-yellow-400">中等置信度段</div>
+                                            </div>
+                                            <div className="bg-orange-600/20 p-3 rounded text-center">
+                                                <div className="text-lg font-bold text-orange-300">
+                                                    {speech_recognition.confidence_distribution.low || 0}
+                                                </div>
+                                                <div className="text-xs text-orange-400">低置信度段</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Enhancement Information */}
+                                {speech_recognition.enhancement_info && speech_recognition.enhancement_info.enhancement_successful && (
+                                    <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-4 rounded-lg border border-blue-500/20 mt-4">
+                                        <h5 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
+                                            <span>🔧</span>
+                                            文本增强详情
+                                        </h5>
+                                        
+                                        {/* Enhancement Improvements */}
+                                        {speech_recognition.enhancement_info.improvements && speech_recognition.enhancement_info.improvements.length > 0 && (
+                                            <div className="mb-3">
+                                                <div className="text-xs text-slate-400 mb-2">应用的改进:</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {speech_recognition.enhancement_info.improvements.map((improvement, index) => (
+                                                        <span key={index} className="text-xs bg-blue-600/20 text-blue-300 px-2 py-1 rounded-full">
+                                                            {improvement}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Quality Metrics */}
+                                        {speech_recognition.enhancement_info.quality_metrics && (
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                                <div className="bg-slate-800/30 p-2 rounded">
+                                                    <div className="text-slate-400">质量分数</div>
+                                                    <div className="text-white font-medium">
+                                                        {Math.round(speech_recognition.enhancement_info.quality_metrics.overall_score * 100)}%
+                                                    </div>
+                                                </div>
+                                                <div className="bg-slate-800/30 p-2 rounded">
+                                                    <div className="text-slate-400">标点改进</div>
+                                                    <div className="text-white font-medium">
+                                                        +{speech_recognition.enhancement_info.quality_metrics.punctuation_improvement || 0}
+                                                    </div>
+                                                </div>
+                                                <div className="bg-slate-800/30 p-2 rounded">
+                                                    <div className="text-slate-400">句子数</div>
+                                                    <div className="text-white font-medium">
+                                                        {speech_recognition.enhancement_info.quality_metrics.sentence_count || 0}
+                                                    </div>
+                                                </div>
+                                                <div className="bg-slate-800/30 p-2 rounded">
+                                                    <div className="text-slate-400">重复率</div>
+                                                    <div className="text-white font-medium">
+                                                        {Math.round((speech_recognition.enhancement_info.quality_metrics.repetition_ratio || 0) * 100)}%
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 
                                 {/* Additional metrics if available */}
                                 {(speech_recognition.words_per_minute || speech_recognition.text_length) && (

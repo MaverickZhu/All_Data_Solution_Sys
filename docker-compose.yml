@@ -94,13 +94,7 @@ services:
         condition: service_started
       milvus-standalone:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 16G
-    restart: on-failure
-    networks:
-      - multimodal_network
+    runtime: nvidia
     environment:
       <<: *app-env # Inherit all shared environment variables
       # Override or add specific variables for the worker if needed
@@ -111,6 +105,21 @@ services:
       POSTGRES_PASSWORD: "password"
       POSTGRES_DB: "multimodal_analysis"
       SYNC_DATABASE_URL: "postgresql+psycopg2://postgres:password@postgres:5432/multimodal_analysis"
+      # GPU support environment variables
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: on-failure
+    networks:
+      - multimodal_network
 
   # --- 生产级基础设施 (可选，可注释掉) ---
   neo4j:

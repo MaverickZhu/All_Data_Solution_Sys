@@ -1,0 +1,96 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+.pytest_cache
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.env
+.venv
+env/
+venv/
+
+# Node.js (frontend)
+frontend/node_modules
+frontend/dist
+frontend/build
+frontend/.eslintcache
+frontend/coverage
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Documentation
+*.md
+docs/
+
+# Test files
+test_*.py
+*_test.py
+tests/
+examples/
+
+# Uploads and temporary files
+uploads/
+temp/
+tmp/
+
+# Database files
+*.db
+*.sqlite3
+
+# Jupyter notebooks
+*.ipynb
+
+# Data files (exclude large data files)
+*.csv
+*.json
+*.xml
+*.xlsx
+*.zip
+*.tar.gz
+
+# Kubernetes
+k8s/
+
+# Docker
+docker-compose.override.yml
+
+# Scripts
+scripts/
+
+# Alembic (exclude migration files from image)
+backend/alembic/versions/
+
+# Backend specific excludes
+backend/data/
+backend/logs/ 

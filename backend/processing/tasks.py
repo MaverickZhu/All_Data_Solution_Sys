@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 import json
 import pandas as pd
@@ -53,6 +54,8 @@ from backend.semantic_processing.embedding_service import EmbeddingService
 from backend.services.mongo_service import mongo_service
 from backend.services.llm_service import LLMService # 引入LLMService
 # Removed AudioDescriptionService import - using direct Whisper integration instead
+
+from backend.services.audio_enhancement import ChineseAudioEnhancer
 
 logger = logging.getLogger("ml")
 
@@ -707,110 +710,61 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             "file_size_mb": round(file_size / (1024 * 1024), 2)
         }
         
-        # 5. Speech recognition using Whisper (high-accuracy approach)
+        # 5. GPU加速语音识别
         speech_analysis = {}
         try:
-            logger.info("Starting speech recognition for audio content...")
-            import whisper
+            from backend.services.whisper_service import whisper_service
             
-            # Load Whisper Turbo model for optimal speed-accuracy balance  
-            logger.info("Loading Whisper Turbo model for optimal speed and Chinese recognition...")
-            model = whisper.load_model("turbo")
+            logger.info("🎯 启动GPU加速语音识别...")
+            start_time = time.time()
             
-            # Perform transcription with optimized settings for Chinese
-            logger.info("Performing transcription with Chinese optimization...")
-            # First try Chinese
-            result = model.transcribe(
-                str(audio_path), 
-                language="zh",  # Specify Chinese first
-                word_timestamps=True,
-                temperature=0.0  # Deterministic output
-            )
+            # 使用优化的WhisperService进行转录
+            result = whisper_service.transcribe_audio(audio_path, language="zh")
             
-            # If Chinese transcription confidence is low, try auto-detect
-            if (not result.get("text") or len(result.get("text", "").strip()) < 10):
-                logger.info("Chinese transcription yielded little content, trying auto-detection...")
-                result = model.transcribe(
-                    str(audio_path), 
-                    language=None,  # Auto-detect language
-                    word_timestamps=True,
-                    temperature=0.0
-                )
-            
-            if result and result.get("text"):
-                # Calculate confidence based on segments (Large V3 improved)
-                segments = result.get("segments", [])
-                total_confidence = 0
-                total_duration = 0
-                word_count = 0
-                
-                # Enhanced confidence calculation for Large V3
-                for segment in segments:
-                    if 'end' in segment and 'start' in segment:
-                        duration = segment['end'] - segment['start']
-                        
-                        # Use avg_logprob for more accurate confidence (available in Large V3)
-                        if 'avg_logprob' in segment:
-                            # Convert log probability to confidence (approximate)
-                            confidence = max(0.0, min(1.0, np.exp(segment['avg_logprob'])))
-                        elif 'confidence' in segment:
-                            confidence = segment.get('confidence', 0)
-                        else:
-                            # Fallback: estimate confidence based on text length
-                            text_length = len(segment.get('text', ''))
-                            confidence = min(0.9, text_length / 50.0)  # Rough estimate
-                        
-                        total_confidence += confidence * duration
-                        total_duration += duration
-                        
-                        # Count words for additional metrics
-                        words = segment.get('words', [])
-                        if words:
-                            word_count += len(words)
-                        else:
-                            # Estimate word count from text
-                            word_count += len(segment.get('text', '').split())
-                
-                avg_confidence = total_confidence / total_duration if total_duration > 0 else 0
-                
-                # Additional quality metrics
-                text_length = len(result["text"].strip())
-                words_per_minute = (word_count / (total_duration / 60)) if total_duration > 0 else 0
+            if result and result.get("text") and not result.get("error"):
+                processed_text = result["text"].strip()
                 
                 speech_analysis = {
                     "success": True,
-                    "transcribed_text": result["text"].strip(),
-                    "language_detected": result.get("language", "unknown"),
-                    "confidence": round(avg_confidence, 3),
-                    "segments_count": len(segments),
-                    "word_count": word_count,
-                    "words_per_minute": round(words_per_minute, 1),
-                    "text_length": text_length,
-                    "model_info": {
-                        "model": "large-v3",
-                        "multilingual": True,
-                        "parameters": "1550M"
-                    }
-                }
-                logger.info(f"Speech recognition completed: {len(result['text'])} characters transcribed")
-            else:
-                speech_analysis = {
-                    "success": False,
-                    "error": "No speech content detected",
-                    "transcribed_text": "",
-                    "language_detected": "unknown",
-                    "confidence": 0
+                    "transcribed_text": processed_text,
+                    "language_detected": result.get("language", "zh"),
+                    "confidence": result.get("confidence", 0),
+                    "segments_count": result.get("segments_count", 0),
+                    "word_count": len(processed_text.split()) if processed_text else 0,
+                    "gpu_accelerated": result.get("gpu_accelerated", False),
+                    "model_used": result.get("model_used", "unknown"),
+                    "processing_time": result.get("processing_time", 0),
+                    "transcription_time": result.get("transcription_time", 0)
                 }
                 
+                logger.info(f"✅ 语音识别成功: {len(processed_text)}字符, GPU加速: {result.get('gpu_accelerated', False)}")
+                
+            else:
+                error_msg = result.get("error", "No speech content detected") if result else "转录失败"
+                speech_analysis = {
+                    "success": False,
+                    "error": error_msg,
+                    "transcribed_text": "",
+                    "language_detected": "unknown",
+                    "confidence": 0,
+                    "gpu_accelerated": result.get("gpu_accelerated", False) if result else False,
+                    "processing_time": result.get("processing_time", 0) if result else 0
+                }
+                logger.warning(f"⚠️ 语音识别失败: {error_msg}")
+                
         except Exception as e:
-            logger.error(f"Speech recognition failed: {e}", exc_info=True)
+            logger.error(f"❌ 语音识别异常: {e}", exc_info=True)
             speech_analysis = {
                 "success": False,
                 "error": str(e),
                 "transcribed_text": "",
                 "language_detected": "unknown", 
-                "confidence": 0
+                "confidence": 0,
+                "gpu_accelerated": False,
+                "processing_time": 0
             }
+
+
         
         # 6. Enhanced analysis summary with rule-based classification
         enhanced_summary = analysis_summary.copy()

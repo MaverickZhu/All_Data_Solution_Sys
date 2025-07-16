@@ -60,6 +60,10 @@ speechrecognition==3.10.0
 pydub==0.25.1
 openai-whisper==20240930
 
+# GPU-accelerated PyTorch for audio processing
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+
 # Vector DB
 pymilvus
 
