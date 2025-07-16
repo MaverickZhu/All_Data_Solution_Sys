@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class AudioDescriptionService:
     """音频描述生成服务，使用Qwen2.5模型分析音频内容"""
     
-    def __init__(self, model_name: str = "qwen2.5:32b", ollama_url: str = "http://host.docker.internal:11435"):
+    def __init__(self, model_name: str = "qwen2.5vl:7b", ollama_url: str = "http://host.docker.internal:11435"):
         self.model_name = model_name
         self.ollama_url = ollama_url
         
