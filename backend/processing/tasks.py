@@ -713,9 +713,9 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             logger.info("Starting speech recognition for audio content...")
             import whisper
             
-            # Load high-accuracy Whisper model for better Chinese recognition
-            logger.info("Loading Whisper Large V3 model for optimal accuracy...")
-            model = whisper.load_model("large-v3")
+            # Load Whisper Turbo model for optimal speed-accuracy balance  
+            logger.info("Loading Whisper Turbo model for optimal speed and Chinese recognition...")
+            model = whisper.load_model("turbo")
             
             # Perform transcription with optimized settings for Chinese
             logger.info("Performing transcription with Chinese optimization...")
