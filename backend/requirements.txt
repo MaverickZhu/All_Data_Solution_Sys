@@ -26,7 +26,7 @@ requests==2.32.3
 # Data Science & ML
 ydata-profiling[default]
 pandas
-numpy
+numpy>=1.26.0
 scikit-learn==1.5.1
 
 # NLP and Text Processing
@@ -47,6 +47,13 @@ ollama==0.3.0
 # Image Processing
 Pillow==10.4.0
 imagehash==4.3.1
+
+# Audio/Video Processing
+librosa>=0.10.2
+scipy>=1.13.0
+mutagen==1.47.0
+opencv-python-headless>=4.9.0
+ffmpeg-python==0.2.0
 
 # Vector DB
 pymilvus

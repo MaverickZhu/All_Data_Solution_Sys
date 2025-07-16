@@ -30,18 +30,24 @@ def get_file_extension(filename: str) -> str:
 
 def get_analysis_category(file_type: str) -> AnalysisCategory:
     # A more robust mapping can be implemented here
-    text_based = ["txt", "md", "pdf", "docx", "py", "js", "html", "css", "json", "xml", "csv"]
+    text_based = ["txt", "md", "pdf", "docx", "py", "js", "html", "css", "json", "xml"]
     image_based = ["jpg", "jpeg", "png", "gif", "bmp", "tiff"]
     tabular_based = ["csv", "xls", "xlsx"] # Note: csv is in both text and tabular
+    audio_based = ["mp3", "wav", "m4a", "flac", "aac", "wma", "ogg"]
+    video_based = ["mp4", "avi", "mov", "mkv", "wmv", "flv", "webm", "m4v", "3gp"]
 
     if file_type in tabular_based:
         return AnalysisCategory.TABULAR
-    if file_type in image_based:
+    elif file_type in image_based:
         return AnalysisCategory.IMAGE
-    if file_type in text_based:
+    elif file_type in audio_based:
+        return AnalysisCategory.AUDIO
+    elif file_type in video_based:
+        return AnalysisCategory.VIDEO
+    elif file_type in text_based:
         return AnalysisCategory.TEXTUAL
-    
-    return AnalysisCategory.UNSTRUCTURED
+    else:
+        return AnalysisCategory.UNSTRUCTURED
 
 
 class DataSourceService:

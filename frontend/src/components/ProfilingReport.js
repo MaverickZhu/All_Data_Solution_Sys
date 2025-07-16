@@ -3,6 +3,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import EChartsVisualization from './EChartsVisualization';
 import ImageAnalysisReport from './ImageAnalysisReport';
+import AudioAnalysisReport from './AudioAnalysisReport';
+import VideoAnalysisReport from './VideoAnalysisReport';
 
 
 const StatCard = ({ label, value, icon, className = '' }) => (
@@ -319,9 +321,18 @@ const ProfilingReport = ({ report, dataSource }) => {
     );
   }
 
+
+
+  // 音频分析数据结构验证通过 ✅
+
   const isTextFile = report.analysis_type === 'text';
   const isTabularFile = report.analysis_type === 'tabular';
   const isImageFile = report.analysis_type === 'image';
+  const isAudioFile = report.analysis_type === 'audio';
+  const isVideoFile = report.analysis_type === 'video';
+  
+
+
   const tableStats = report.table;
   const tabularStats = report.basic_info;
   const textStats = report.text_stats;
@@ -377,6 +388,24 @@ const ProfilingReport = ({ report, dataSource }) => {
             <StatCard label="颜色模式" value={report.image_properties.mode ?? 'N/A'} />
             <StatCard label="感知哈希" value={report.image_properties.phash ?? 'N/A'} />
           </div>
+        ) : isAudioFile && report.file_info ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard label="时长" value={report.analysis_summary?.total_duration ? `${Math.floor(report.analysis_summary.total_duration / 60)}分${Math.floor(report.analysis_summary.total_duration % 60)}秒` : 'N/A'} />
+            <StatCard label="音频格式" value={report.file_info.format?.toUpperCase() ?? 'N/A'} />
+            <StatCard label="文件大小" value={report.analysis_summary?.file_size_mb ? `${report.analysis_summary.file_size_mb} MB` : 'N/A'} />
+            <StatCard label="比特率" value={report.audio_properties?.bitrate ? `${report.audio_properties.bitrate} kbps` : 'N/A'} />
+            <StatCard label="采样率" value={report.audio_properties?.sample_rate ? `${report.audio_properties.sample_rate} Hz` : 'N/A'} />
+            <StatCard label="音频质量" value={report.analysis_summary?.audio_quality ?? 'N/A'} />
+          </div>
+        ) : isVideoFile && report.file_info ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard label="分辨率" value={report.video_properties?.resolution ?? 'N/A'} />
+            <StatCard label="时长" value={report.analysis_summary?.duration_formatted ?? 'N/A'} />
+            <StatCard label="视频格式" value={report.file_info.format?.toUpperCase() ?? 'N/A'} />
+            <StatCard label="帧率" value={report.video_properties?.fps ? `${report.video_properties.fps.toFixed(2)} FPS` : 'N/A'} />
+            <StatCard label="文件大小" value={report.quality_info?.file_size_mb ? `${report.quality_info.file_size_mb} MB` : 'N/A'} />
+            <StatCard label="视频质量" value={report.quality_info?.resolution_category ?? 'N/A'} />
+          </div>
         ) : tableStats ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard label="变量数量" value={tableStats.n_var ?? 'N/A'} />
@@ -394,6 +423,20 @@ const ProfilingReport = ({ report, dataSource }) => {
       {isImageFile && (
         <Section title="图像分析报告" icon={<span className="text-2xl">🖼️</span>}>
           <ImageAnalysisReport result={report} filePath={dataSource?.file_path} />
+        </Section>
+      )}
+
+      {/* --- Audio Analysis --- */}
+      {isAudioFile && (
+        <Section title="音频分析报告" icon={<span className="text-2xl">🎵</span>}>
+          <AudioAnalysisReport result={report} />
+        </Section>
+      )}
+
+      {/* --- Video Analysis --- */}
+      {isVideoFile && (
+        <Section title="视频分析报告" icon={<span className="text-2xl">🎬</span>}>
+          <VideoAnalysisReport result={report} filePath={dataSource?.file_path} />
         </Section>
       )}
 
@@ -639,7 +682,7 @@ const ProfilingReport = ({ report, dataSource }) => {
       )}
 
       {/* --- Variable Details for legacy table data --- */}
-      {!isTextFile && !isTabularFile && report.variables && (
+      {!isTextFile && !isTabularFile && !isImageFile && !isAudioFile && !isVideoFile && report.variables && (
         <Section title="变量详情" icon={<span className="text-2xl">🔬</span>}>
           <div className="bg-slate-900/70 rounded-xl overflow-hidden border border-slate-700/50">
             <SyntaxHighlighter 
@@ -649,6 +692,31 @@ const ProfilingReport = ({ report, dataSource }) => {
               wrapLongLines={true}
             >
               {JSON.stringify(report.variables, null, 2)}
+            </SyntaxHighlighter>
+          </div>
+        </Section>
+      )}
+
+      {/* --- Fallback for unknown data types or analysis failures --- */}
+      {(isAudioFile || isVideoFile) && report.error && !report.file_info && (
+        <Section title="原始元数据" icon={<span className="text-2xl">📋</span>}>
+          <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-4 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-amber-400">⚠️</span>
+              <span className="text-amber-300 font-semibold">分析处理中遇到问题</span>
+            </div>
+            <p className="text-amber-200 text-sm">
+              音频/视频分析功能正在处理您的文件，但可能遇到了兼容性问题。以下是提取到的原始元数据：
+            </p>
+          </div>
+          <div className="bg-slate-900/70 rounded-xl overflow-hidden border border-slate-700/50">
+            <SyntaxHighlighter 
+              language="json" 
+              style={vscDarkPlus} 
+              customStyle={{ background: 'transparent', padding: '1.5rem', margin: 0, fontSize: '0.875rem' }}
+              wrapLongLines={true}
+            >
+              {JSON.stringify(report, null, 2)}
             </SyntaxHighlighter>
           </div>
         </Section>

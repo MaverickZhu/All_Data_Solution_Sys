@@ -26,6 +26,15 @@ import pypandoc
 from sklearn.cluster import KMeans # 导入KMeans
 from PIL.ExifTags import TAGS # 导入TAGS用于解析EXIF
 
+# Audio/Video processing imports
+import librosa
+import mutagen
+from mutagen.mp3 import MP3
+from mutagen.wave import WAVE
+from mutagen.mp4 import MP4
+from mutagen.flac import FLAC
+import cv2
+
 # Explicitly add the NLTK data path defined in the Dockerfile
 # This ensures that NLTK looks for data in our specified location.
 nltk.data.path.append("/usr/local/share/nltk_data")
@@ -43,6 +52,7 @@ from backend.core.config import settings
 from backend.semantic_processing.embedding_service import EmbeddingService
 from backend.services.mongo_service import mongo_service
 from backend.services.llm_service import LLMService # 引入LLMService
+from backend.services.audio_description_service import AudioDescriptionService
 
 logger = logging.getLogger("ml")
 
@@ -586,6 +596,356 @@ def perform_image_analysis(image_path: Path) -> dict:
         }
 
 
+def perform_audio_analysis(audio_path: Path) -> dict:
+    """
+    Performs comprehensive analysis on an audio file.
+    
+    Args:
+        audio_path: Path to the audio file.
+        
+    Returns:
+        A dictionary containing analysis results like duration, sample rate,
+        bitrate, format, and basic audio features.
+    """
+    try:
+        logger.info(f"Starting audio analysis for {audio_path}")
+        
+        # 1. Basic file information
+        file_size = audio_path.stat().st_size
+        file_extension = audio_path.suffix.lower()
+        
+        # 2. Metadata extraction using mutagen
+        metadata = {}
+        audio_info = {}
+        
+        try:
+            # Try to load with mutagen for metadata
+            if file_extension == '.mp3':
+                audio_file = MP3(audio_path)
+            elif file_extension == '.wav':
+                audio_file = WAVE(audio_path)
+            elif file_extension in ['.m4a', '.mp4']:
+                audio_file = MP4(audio_path)
+            elif file_extension == '.flac':
+                audio_file = FLAC(audio_path)
+            else:
+                # Fallback to generic mutagen
+                audio_file = mutagen.File(audio_path)
+            
+            if audio_file is not None:
+                # Extract metadata
+                for key, value in audio_file.items():
+                    if isinstance(value, (list, tuple)) and len(value) > 0:
+                        metadata[key] = str(value[0])
+                    else:
+                        metadata[key] = str(value)
+                
+                # Audio properties
+                if hasattr(audio_file, 'info'):
+                    info = audio_file.info
+                    audio_info = {
+                        "duration_seconds": getattr(info, 'length', 0),
+                        "bitrate": getattr(info, 'bitrate', 0),
+                        "sample_rate": getattr(info, 'sample_rate', 0),
+                        "channels": getattr(info, 'channels', 0),
+                        "format": file_extension[1:]  # Remove the dot
+                    }
+                
+        except Exception as e:
+            logger.warning(f"Could not extract metadata from {audio_path}: {e}")
+        
+        # 3. Audio feature analysis using librosa
+        audio_features = {}
+        try:
+            # Fix scipy compatibility issue
+            import scipy.signal
+            if not hasattr(scipy.signal, 'hann'):
+                scipy.signal.hann = scipy.signal.windows.hann
+            
+            # Load audio with librosa
+            y, sr = librosa.load(audio_path, sr=None, duration=30)  # Analyze first 30 seconds
+            
+            # Basic features
+            duration = librosa.get_duration(y=y, sr=sr)
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            
+            # Spectral features
+            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
+            zero_crossing_rate = librosa.feature.zero_crossing_rate(y)[0]
+            
+            # MFCC features (first 13 coefficients)
+            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+            
+            audio_features = {
+                "duration_seconds": float(duration),
+                "tempo_bpm": float(tempo),
+                "sample_rate": int(sr),
+                "spectral_centroid_mean": float(np.mean(spectral_centroids)),
+                "spectral_rolloff_mean": float(np.mean(spectral_rolloff)),
+                "zero_crossing_rate_mean": float(np.mean(zero_crossing_rate)),
+                "mfcc_means": [float(np.mean(mfcc)) for mfcc in mfccs],
+                "energy": float(np.sum(y**2) / len(y))  # RMS energy
+            }
+            
+        except Exception as e:
+            logger.warning(f"Could not extract audio features from {audio_path}: {e}")
+            # Fallback to basic info
+            if not audio_info:
+                audio_features = {
+                    "duration_seconds": 0,
+                    "tempo_bpm": 0,
+                    "sample_rate": 0,
+                    "format": file_extension[1:]
+                }
+        
+        # 4. Generate analysis summary
+        analysis_summary = {
+            "total_duration": audio_features.get("duration_seconds", audio_info.get("duration_seconds", 0)),
+            "audio_quality": "高质量" if audio_info.get("bitrate", 0) > 256 else "标准质量" if audio_info.get("bitrate", 0) > 128 else "低质量",
+            "format_info": f"{file_extension[1:].upper()} 格式",
+            "file_size_mb": round(file_size / (1024 * 1024), 2)
+        }
+        
+        # 5. AI-powered audio content analysis
+        ai_analysis = {}
+        try:
+            logger.info("Starting AI analysis for audio content...")
+            audio_service = AudioDescriptionService()
+            
+            # 准备音频特征数据用于AI分析
+            ai_features = {
+                "duration": audio_features.get("duration_seconds", 0),
+                "sample_rate": audio_features.get("sample_rate", 0),
+                "avg_amplitude": audio_features.get("energy", 0),
+                "max_amplitude": audio_features.get("energy", 0) * 2,  # 估算
+                "avg_spectral_centroid": audio_features.get("spectral_centroid_mean", 0),
+                "avg_zero_crossing_rate": audio_features.get("zero_crossing_rate_mean", 0),
+                "avg_spectral_rolloff": audio_features.get("spectral_rolloff_mean", 0),
+                "mfcc_features": audio_features.get("mfcc_means", []),
+                "tempo": audio_features.get("tempo_bpm", 0),
+                "beat_count": int(audio_features.get("tempo_bpm", 0) * audio_features.get("duration_seconds", 0) / 60) if audio_features.get("tempo_bpm", 0) > 0 else 0
+            }
+            
+            # 调用AI分析
+            import asyncio
+            try:
+                ai_result = asyncio.run(audio_service.generate_description(audio_path, ai_features))
+            except Exception as ai_error:
+                logger.error(f"AI analysis failed: {ai_error}")
+                ai_result = {"success": False}
+            
+            if ai_result.get("success"):
+                ai_analysis = {
+                    "ai_description": ai_result.get("description", ""),
+                    "ai_analysis": ai_result.get("parsed_analysis", {}),
+                    "ai_audio_type": ai_result.get("parsed_analysis", {}).get("audio_type", "未知"),
+                    "ai_quality_assessment": ai_result.get("parsed_analysis", {}).get("quality_assessment", "无法评估"),
+                    "ai_feature_tags": ai_result.get("parsed_analysis", {}).get("feature_tags", []),
+                    "ai_usage_scenarios": ai_result.get("parsed_analysis", {}).get("usage_scenarios", [])
+                }
+                logger.info("AI audio analysis completed successfully")
+            else:
+                logger.warning(f"AI audio analysis failed: {ai_result.get('error')}")
+                ai_analysis = {
+                    "ai_description": "AI分析失败",
+                    "ai_error": ai_result.get("error", "未知错误")
+                }
+                
+        except Exception as e:
+            logger.error(f"AI audio analysis failed with exception: {e}", exc_info=True)
+            ai_analysis = {
+                "ai_description": "AI分析遇到技术问题",
+                "ai_error": str(e)
+            }
+        
+        # 6. Enhanced analysis summary with AI insights
+        enhanced_summary = analysis_summary.copy()
+        
+        # 使用AI分析结果增强摘要（如果可用）
+        if ai_analysis.get("ai_audio_type") and ai_analysis["ai_audio_type"] != "未知":
+            enhanced_summary["audio_type"] = ai_analysis["ai_audio_type"]
+        else:
+            # Fallback to rule-based classification
+            audio_type = "未知"
+            if audio_features.get("tempo_bpm", 0) > 120:
+                audio_type = "快节奏音乐"
+            elif audio_features.get("tempo_bpm", 0) > 80:
+                audio_type = "中等节奏音乐"
+            elif audio_features.get("tempo_bpm", 0) > 0:
+                audio_type = "慢节奏音乐"
+            
+            if audio_features.get("energy", 0) < 0.01:
+                audio_type = "语音/安静音频"
+            
+            enhanced_summary["audio_type"] = audio_type
+        
+        # 添加AI分析的质量评估
+        if ai_analysis.get("ai_quality_assessment"):
+            enhanced_summary["audio_quality"] = ai_analysis["ai_quality_assessment"]
+        
+        # Combine all results
+        result = {
+            "analysis_type": "audio",
+            "file_info": {
+                "file_size_bytes": file_size,
+                "format": file_extension[1:],
+                "file_path": str(audio_path)
+            },
+            "metadata": metadata,
+            "audio_properties": {**audio_info, **audio_features},
+            "analysis_summary": enhanced_summary,
+            "ai_analysis": ai_analysis  # 新增AI分析结果
+        }
+        
+        logger.info(f"Audio analysis completed successfully for {audio_path}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to analyze audio {audio_path}: {e}", exc_info=True)
+        return {
+            "analysis_type": "audio",
+            "error": f"Failed to analyze audio: {e}",
+            "file_info": {
+                "file_size_bytes": audio_path.stat().st_size if audio_path.exists() else 0,
+                "format": audio_path.suffix[1:] if audio_path.suffix else "unknown"
+            }
+        }
+
+
+def perform_video_analysis(video_path: Path) -> dict:
+    """
+    Performs comprehensive analysis on a video file.
+    
+    Args:
+        video_path: Path to the video file.
+        
+    Returns:
+        A dictionary containing analysis results like duration, resolution,
+        frame rate, format, and basic video features.
+    """
+    try:
+        logger.info(f"Starting video analysis for {video_path}")
+        
+        # 1. Basic file information
+        file_size = video_path.stat().st_size
+        file_extension = video_path.suffix.lower()
+        
+        # 2. Video analysis using OpenCV
+        video_info = {}
+        metadata = {}
+        
+        try:
+            # Open video with OpenCV
+            cap = cv2.VideoCapture(str(video_path))
+            
+            if cap.isOpened():
+                # Basic video properties
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                duration = frame_count / fps if fps > 0 else 0
+                
+                video_info = {
+                    "width": width,
+                    "height": height,
+                    "fps": fps,
+                    "frame_count": frame_count,
+                    "duration_seconds": duration,
+                    "resolution": f"{width}x{height}",
+                    "aspect_ratio": round(width / height, 2) if height > 0 else 0
+                }
+                
+                # Generate thumbnail (first frame)
+                ret, frame = cap.read()
+                thumbnail_path = None
+                if ret:
+                    thumbnail_filename = f"thumb_{video_path.stem}.jpg"
+                    thumbnail_path = video_path.parent / thumbnail_filename
+                    cv2.imwrite(str(thumbnail_path), frame)
+                    video_info["thumbnail_path"] = str(thumbnail_path)
+                
+                cap.release()
+            
+        except Exception as e:
+            logger.warning(f"Could not extract video properties from {video_path}: {e}")
+        
+        # 3. Metadata extraction using mutagen (for some video formats)
+        try:
+            if file_extension in ['.mp4', '.m4v']:
+                video_file = MP4(video_path)
+                if video_file is not None:
+                    for key, value in video_file.items():
+                        if isinstance(value, (list, tuple)) and len(value) > 0:
+                            metadata[key] = str(value[0])
+                        else:
+                            metadata[key] = str(value)
+                            
+        except Exception as e:
+            logger.warning(f"Could not extract metadata from {video_path}: {e}")
+        
+        # 4. Video quality assessment
+        quality_info = {
+            "resolution_category": "4K" if video_info.get("height", 0) >= 2160 else 
+                                  "Full HD" if video_info.get("height", 0) >= 1080 else 
+                                  "HD" if video_info.get("height", 0) >= 720 else 
+                                  "SD",
+            "frame_rate_category": "高帧率" if video_info.get("fps", 0) >= 60 else 
+                                  "标准帧率" if video_info.get("fps", 0) >= 24 else 
+                                  "低帧率",
+            "file_size_mb": round(file_size / (1024 * 1024), 2)
+        }
+        
+        # 5. Video type classification
+        duration = video_info.get("duration_seconds", 0)
+        video_type = "未知"
+        if duration < 30:
+            video_type = "短视频"
+        elif duration < 300:  # 5 minutes
+            video_type = "中等时长视频"
+        elif duration < 3600:  # 1 hour
+            video_type = "长视频"
+        else:
+            video_type = "超长视频"
+        
+        # 6. Generate analysis summary
+        analysis_summary = {
+            "duration_formatted": f"{int(duration // 60)}分{int(duration % 60)}秒",
+            "video_type": video_type,
+            "quality_summary": f"{quality_info['resolution_category']} {quality_info['frame_rate_category']}",
+            "format_info": f"{file_extension[1:].upper()} 格式"
+        }
+        
+        # Combine all results
+        result = {
+            "analysis_type": "video",
+            "file_info": {
+                "file_size_bytes": file_size,
+                "format": file_extension[1:],
+                "file_path": str(video_path)
+            },
+            "metadata": metadata,
+            "video_properties": video_info,
+            "quality_info": quality_info,
+            "analysis_summary": analysis_summary
+        }
+        
+        logger.info(f"Video analysis completed successfully for {video_path}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to analyze video {video_path}: {e}", exc_info=True)
+        return {
+            "analysis_type": "video",
+            "error": f"Failed to analyze video: {e}",
+            "file_info": {
+                "file_size_bytes": video_path.stat().st_size if video_path.exists() else 0,
+                "format": video_path.suffix[1:] if video_path.suffix else "unknown"
+            }
+        }
+
+
 def convert_to_serializable(obj):
     """
     Recursively converts non-serializable objects (like numpy types)
@@ -706,6 +1066,22 @@ def run_profiling_task(self, data_source_id: int):
             else:
                 logger.warning(f"Unsupported image file type: {data_source.file_type}")
                 profile_result = {"error": f"Unsupported image file type: {data_source.file_type}"}
+
+        elif data_source.analysis_category == AnalysisCategory.AUDIO:
+            # Audio file handling
+            if data_source.file_type in ['mp3', 'wav', 'm4a', 'flac']:
+                profile_result = perform_audio_analysis(file_path)
+            else:
+                logger.warning(f"Unsupported audio file type: {data_source.file_type}")
+                profile_result = {"error": f"Unsupported audio file type: {data_source.file_type}"}
+
+        elif data_source.analysis_category == AnalysisCategory.VIDEO:
+            # Video file handling
+            if data_source.file_type in ['mp4', 'avi', 'mov', 'm4v', 'mkv']:
+                profile_result = perform_video_analysis(file_path)
+            else:
+                logger.warning(f"Unsupported video file type: {data_source.file_type}")
+                profile_result = {"error": f"Unsupported video file type: {data_source.file_type}"}
         
         else:
             logger.warning(f"Unsupported analysis category: {data_source.analysis_category}")

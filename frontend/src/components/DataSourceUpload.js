@@ -17,16 +17,36 @@ const DataSourceUpload = ({ projectId, onSuccess, onClose }) => {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
+      // 文本文件
       'text/csv': ['.csv'],
-      'application/pdf': ['.pdf'],
       'text/plain': ['.txt'],
       'text/markdown': ['.md'],
+      'application/json': ['.json'],
+      
+      // 文档文件
+      'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      
+      // 图像文件
       'image/jpeg': ['.jpg', '.jpeg'],
       'image/png': ['.png'],
+      'image/gif': ['.gif'],
+      
+      // 音频文件
+      'audio/mpeg': ['.mp3'],
+      'audio/wav': ['.wav'],
+      'audio/x-m4a': ['.m4a'],
+      'audio/flac': ['.flac'],
+      
+      // 视频文件
+      'video/mp4': ['.mp4'],
+      'video/x-msvideo': ['.avi'],
+      'video/quicktime': ['.mov'],
+      'video/x-matroska': ['.mkv'],
     },
     maxFiles: 1,
-    maxSize: 200 * 1024 * 1024, // 200MB
+    maxSize: 2 * 1024 * 1024 * 1024, // 2GB
   });
 
   const handleUpload = async () => {
@@ -59,13 +79,20 @@ const DataSourceUpload = ({ projectId, onSuccess, onClose }) => {
           <p className="mt-4 text-sm text-gray-600">
             {isDragActive ? '将文件拖放到此处...' : '将文件拖到此处，或点击选择文件'}
           </p>
-          <p className="text-xs text-gray-500 mt-1">支持 DOCX, PDF, MD, TXT, CSV, JPG, PNG (最大 200MB)</p>
+          <div className="text-xs text-gray-500 mt-2 space-y-1">
+            <p><strong>文本文档:</strong> TXT, MD, PDF, DOCX, CSV, XLSX, JSON</p>
+            <p><strong>图像文件:</strong> JPG, JPEG, PNG, GIF</p>
+            <p><strong>音频文件:</strong> MP3, WAV, M4A, FLAC</p>
+            <p><strong>视频文件:</strong> MP4, AVI, MOV, MKV</p>
+            <p className="text-blue-600 font-medium">最大文件大小: 2GB</p>
+          </div>
         </div>
       </div>
 
       {file && (
         <div className="text-center p-2 bg-gray-100 rounded-md">
           <p className="text-sm font-medium text-gray-700 truncate">已选择: {file.name}</p>
+          <p className="text-xs text-gray-500">文件大小: {(file.size / (1024 * 1024)).toFixed(2)} MB</p>
         </div>
       )}
       

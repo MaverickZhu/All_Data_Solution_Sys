@@ -4,11 +4,27 @@ FROM python:3.12-slim
 # Set the working directory in the container
 WORKDIR /app
 
+# Install system dependencies for OpenCV, audio/video processing, and other libraries
+RUN apt-get update && apt-get install -y \
+    # OpenCV dependencies
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    # Audio processing dependencies
+    libsndfile1 \
+    ffmpeg \
+    # General utilities
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the requirements file into the container at /app
 COPY ./backend/requirements.txt /app/
 
-# Install dependencies
-RUN pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt && \
+# Install build dependencies first, then project dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install --no-cache-dir jieba -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Install NLTK data
