@@ -55,6 +55,10 @@ mutagen==1.47.0
 opencv-python-headless>=4.9.0
 ffmpeg-python==0.2.0
 
+# Speech Recognition
+speechrecognition==3.10.0
+pydub==0.25.1
+
 # Vector DB
 pymilvus
 

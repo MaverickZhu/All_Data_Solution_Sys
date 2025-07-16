@@ -742,7 +742,12 @@ def perform_audio_analysis(audio_path: Path) -> dict:
                     "ai_audio_type": ai_result.get("parsed_analysis", {}).get("audio_type", "未知"),
                     "ai_quality_assessment": ai_result.get("parsed_analysis", {}).get("quality_assessment", "无法评估"),
                     "ai_feature_tags": ai_result.get("parsed_analysis", {}).get("feature_tags", []),
-                    "ai_usage_scenarios": ai_result.get("parsed_analysis", {}).get("usage_scenarios", [])
+                    "ai_usage_scenarios": ai_result.get("parsed_analysis", {}).get("usage_scenarios", []),
+                    "content_type": ai_result.get("content_type", "unknown"),
+                    "speech_recognition": ai_result.get("speech_recognition", {}),
+                    "transcribed_text": ai_result.get("speech_recognition", {}).get("transcribed_text"),
+                    "speech_confidence": ai_result.get("speech_recognition", {}).get("confidence"),
+                    "detected_language": ai_result.get("speech_recognition", {}).get("language_detected")
                 }
                 logger.info("AI audio analysis completed successfully")
             else:

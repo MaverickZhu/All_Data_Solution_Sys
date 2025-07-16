@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Dict, Optional
 import librosa
 import numpy as np
+import speech_recognition as sr
+from pydub import AudioSegment
+import tempfile
+import os
 from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -71,6 +75,138 @@ class AudioDescriptionService:
             logger.error(f"Failed to extract audio features from {audio_path}: {e}")
             return {}
     
+    def speech_to_text(self, audio_path: Path) -> Dict:
+        """语音识别，将音频转换为文字"""
+        try:
+            logger.info(f"Starting speech recognition for {audio_path}")
+            
+            # 初始化识别器
+            recognizer = sr.Recognizer()
+            
+            # 转换音频格式为WAV（如果需要）
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_wav_path = temp_file.name
+                
+            try:
+                # 使用pydub转换音频格式
+                audio = AudioSegment.from_file(str(audio_path))
+                # 转换为单声道，16kHz采样率，16位深度（最适合语音识别）
+                audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+                audio.export(temp_wav_path, format="wav")
+                
+                # 加载音频文件进行识别
+                with sr.AudioFile(temp_wav_path) as source:
+                    # 调整环境噪声
+                    recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                    # 录制音频
+                    audio_data = recognizer.record(source)
+                
+                # 尝试多种识别引擎
+                recognition_results = {}
+                
+                # 1. 使用Google Web Speech API（免费，但需要网络）
+                try:
+                    text_google = recognizer.recognize_google(audio_data, language='zh-CN')
+                    recognition_results['google_zh'] = text_google
+                    logger.info(f"Google recognition (Chinese): {text_google}")
+                except sr.UnknownValueError:
+                    logger.warning("Google could not understand the audio (Chinese)")
+                except sr.RequestError as e:
+                    logger.warning(f"Google recognition service error (Chinese): {e}")
+                
+                # 2. 尝试英文识别
+                try:
+                    text_google_en = recognizer.recognize_google(audio_data, language='en-US')
+                    recognition_results['google_en'] = text_google_en
+                    logger.info(f"Google recognition (English): {text_google_en}")
+                except sr.UnknownValueError:
+                    logger.warning("Google could not understand the audio (English)")
+                except sr.RequestError as e:
+                    logger.warning(f"Google recognition service error (English): {e}")
+                
+                # 3. 使用Sphinx（离线识别，英文为主）
+                try:
+                    text_sphinx = recognizer.recognize_sphinx(audio_data)
+                    recognition_results['sphinx'] = text_sphinx
+                    logger.info(f"Sphinx recognition: {text_sphinx}")
+                except sr.UnknownValueError:
+                    logger.warning("Sphinx could not understand the audio")
+                except sr.RequestError as e:
+                    logger.warning(f"Sphinx recognition error: {e}")
+                
+                # 清理临时文件
+                os.unlink(temp_wav_path)
+                
+                # 整理结果
+                if recognition_results:
+                    # 选择最佳结果（优先选择中文Google结果）
+                    best_text = None
+                    confidence = "medium"
+                    
+                    if 'google_zh' in recognition_results and recognition_results['google_zh'].strip():
+                        best_text = recognition_results['google_zh']
+                        confidence = "high"
+                    elif 'google_en' in recognition_results and recognition_results['google_en'].strip():
+                        best_text = recognition_results['google_en']
+                        confidence = "high"
+                    elif 'sphinx' in recognition_results and recognition_results['sphinx'].strip():
+                        best_text = recognition_results['sphinx']
+                        confidence = "low"
+                    
+                    return {
+                        "success": True,
+                        "transcribed_text": best_text,
+                        "confidence": confidence,
+                        "all_results": recognition_results,
+                        "language_detected": "zh-CN" if 'google_zh' in recognition_results else "en-US"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "No speech could be recognized",
+                        "transcribed_text": None
+                    }
+                    
+            except Exception as audio_error:
+                # 清理临时文件
+                if os.path.exists(temp_wav_path):
+                    os.unlink(temp_wav_path)
+                raise audio_error
+                
+        except Exception as e:
+            logger.error(f"Speech recognition failed for {audio_path}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "transcribed_text": None
+            }
+    
+    def detect_audio_content_type(self, audio_features: Dict, speech_result: Dict = None) -> str:
+        """检测音频内容类型"""
+        try:
+            # 基于音频特征判断
+            duration = audio_features.get("duration_seconds", 0)
+            zero_crossing_rate = audio_features.get("zero_crossing_rate_mean", 0)
+            spectral_centroid = audio_features.get("spectral_centroid_mean", 0)
+            
+            # 如果有语音识别结果，说明很可能是语音内容
+            if speech_result and speech_result.get("success") and speech_result.get("transcribed_text"):
+                return "speech"
+            
+            # 基于音频特征的启发式判断
+            if zero_crossing_rate > 0.1:  # 高零交叉率可能是语音
+                return "speech"
+            elif spectral_centroid > 3000:  # 高频内容可能是音乐
+                return "music"
+            elif duration < 10:  # 短音频可能是音效
+                return "sound_effect"
+            else:
+                return "unknown"
+                
+        except Exception as e:
+            logger.error(f"Audio content type detection failed: {e}")
+            return "unknown"
+
     async def generate_description(self, audio_path: Path, audio_properties: Dict = None) -> Dict:
         """生成音频的智能描述"""
         try:
@@ -79,6 +215,13 @@ class AudioDescriptionService:
             # 提取音频特征
             if not audio_properties:
                 audio_properties = self.extract_audio_features(audio_path)
+            
+            # 尝试语音识别
+            logger.info("Attempting speech recognition...")
+            speech_result = self.speech_to_text(audio_path)
+            
+            # 检测音频内容类型
+            content_type = self.detect_audio_content_type(audio_properties, speech_result)
             
             # 初始化Ollama LLM
             llm = ChatOllama(
@@ -90,17 +233,22 @@ class AudioDescriptionService:
             # 创建音频分析提示模板
             prompt_template = ChatPromptTemplate.from_template("""
             <|system|>
-            你是一个专业的音频分析专家。你的任务是基于音频的技术特征分析音频内容的特点和可能的类型。
+            你是一个专业的音频分析专家。你的任务是基于音频的技术特征和语音识别结果分析音频内容的特点和类型。
             你必须严格遵守以下规则：
-            1. 分析必须基于提供的音频技术特征数据
+            1. 分析必须基于提供的音频技术特征数据和语音识别结果
             2. 提供准确、专业的音频内容判断
-            3. 识别音频的可能类型（如音乐、语音、环境音等）
+            3. 识别音频的确切类型（音乐、语音、环境音等）
             4. 分析音频的质量和特点
             5. 用中文回答，语言要专业但通俗易懂
-            6. 分析长度控制在300字以内
+            6. 分析长度控制在400字以内
 
             <|user|>
-            请基于以下音频技术特征，详细分析这个音频文件：
+            请基于以下信息，详细分析这个音频文件：
+
+            音频内容类型: {content_type}
+
+            语音识别结果:
+            {speech_recognition_info}
 
             音频基础信息：
             - 时长: {duration:.2f} 秒
@@ -121,19 +269,38 @@ class AudioDescriptionService:
             - 前3个MFCC系数: {mfcc_summary}
 
             请分析：
-            1. 音频内容的可能类型（音乐、语音、环境音、混合等）
-            2. 音频质量评估
-            3. 音频的频率特征和动态特征
-            4. 可能的使用场景或来源
+            1. 音频内容的确切类型和判断依据
+            2. 音频质量评估（清晰度、噪音水平、录制质量等）
+            3. 音频的频率特征和动态特征分析
+            4. 可能的使用场景或来源推测
             5. 音频的整体特点和建议标签
+            6. 如果是语音内容，请重点分析语音特征和内容概要
             """)
             
             # 格式化MFCC特征摘要
             mfcc_features = audio_properties.get('mfcc_features', [])
             mfcc_summary = ", ".join([f"{x:.3f}" for x in mfcc_features[:3]]) if mfcc_features else "无数据"
             
+            # 格式化语音识别结果
+            if speech_result.get('success'):
+                speech_info = f"""
+- 识别成功: 是
+- 转录文本: "{speech_result.get('transcribed_text', '')}"
+- 识别置信度: {speech_result.get('confidence', 'unknown')}
+- 检测语言: {speech_result.get('language_detected', 'unknown')}
+- 所有识别结果: {speech_result.get('all_results', {})}
+                """.strip()
+            else:
+                speech_info = f"""
+- 识别成功: 否
+- 错误信息: {speech_result.get('error', '未知错误')}
+- 说明: 此音频可能不包含语音内容，或音质不适合语音识别
+                """.strip()
+            
             # 准备提示数据
             prompt_data = {
+                "content_type": content_type,
+                "speech_recognition_info": speech_info,
                 "duration": audio_properties.get('duration', 0),
                 "sample_rate": audio_properties.get('sample_rate', 0),
                 "avg_amplitude": audio_properties.get('avg_amplitude', 0),
@@ -172,7 +339,9 @@ class AudioDescriptionService:
                 "success": True,
                 "description": cleaned_description,
                 "parsed_analysis": parsed_result,
-                "technical_features": audio_properties
+                "technical_features": audio_properties,
+                "speech_recognition": speech_result,
+                "content_type": content_type
             }
                 
         except Exception as e:

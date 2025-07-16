@@ -294,6 +294,78 @@ const AudioAnalysisReport = ({ result }) => {
                             </div>
                         )}
 
+                        {/* Speech Recognition Results */}
+                        {ai_analysis && (ai_analysis.transcribed_text || ai_analysis.speech_recognition) && (
+                            <div className="bg-gradient-to-r from-green-900/20 to-teal-900/20 p-4 rounded-lg border border-green-500/20 mt-4">
+                                <h5 className="text-sm font-medium text-green-400 mb-3 flex items-center gap-2">
+                                    <span className="text-lg">🎤</span>
+                                    语音识别结果
+                                </h5>
+                                
+                                {ai_analysis.transcribed_text ? (
+                                    <div className="space-y-3">
+                                        {/* Transcribed Text */}
+                                        <div className="bg-black/30 p-3 rounded-lg">
+                                            <h6 className="text-xs font-medium text-green-300 mb-2">转录文本</h6>
+                                            <p className="text-slate-200 text-sm italic leading-relaxed border-l-2 border-green-500/30 pl-3">
+                                                "{ai_analysis.transcribed_text}"
+                                            </p>
+                                        </div>
+                                        
+                                        {/* Recognition Details */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                            {ai_analysis.speech_confidence && (
+                                                <div className="text-center">
+                                                    <div className="text-xs text-slate-400">识别置信度</div>
+                                                    <div className={`text-sm font-semibold ${
+                                                        ai_analysis.speech_confidence === 'high' ? 'text-green-300' :
+                                                        ai_analysis.speech_confidence === 'medium' ? 'text-yellow-300' :
+                                                        'text-orange-300'
+                                                    }`}>
+                                                        {ai_analysis.speech_confidence === 'high' ? '高' :
+                                                         ai_analysis.speech_confidence === 'medium' ? '中' : '低'}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            
+                                            {ai_analysis.detected_language && (
+                                                <div className="text-center">
+                                                    <div className="text-xs text-slate-400">检测语言</div>
+                                                    <div className="text-sm font-semibold text-blue-300">
+                                                        {ai_analysis.detected_language === 'zh-CN' ? '中文' :
+                                                         ai_analysis.detected_language === 'en-US' ? '英文' : ai_analysis.detected_language}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            
+                                            {ai_analysis.content_type && (
+                                                <div className="text-center">
+                                                    <div className="text-xs text-slate-400">内容类型</div>
+                                                    <div className="text-sm font-semibold text-purple-300">
+                                                        {ai_analysis.content_type === 'speech' ? '语音' :
+                                                         ai_analysis.content_type === 'music' ? '音乐' :
+                                                         ai_analysis.content_type === 'sound_effect' ? '音效' : ai_analysis.content_type}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-slate-800/50 p-3 rounded-lg">
+                                        <div className="text-slate-400 text-sm flex items-center gap-2">
+                                            <span>🔇</span>
+                                            <span>此音频未检测到语音内容或语音识别失败</span>
+                                        </div>
+                                        {ai_analysis.speech_recognition?.error && (
+                                            <div className="text-slate-500 text-xs mt-2">
+                                                原因：{ai_analysis.speech_recognition.error}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* AI Error Handling */}
                         {ai_analysis.ai_error && (
                             <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-4">
