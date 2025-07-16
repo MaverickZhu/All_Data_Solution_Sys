@@ -97,7 +97,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 16G
     restart: on-failure
     networks:
       - multimodal_network

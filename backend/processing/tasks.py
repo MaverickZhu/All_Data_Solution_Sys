@@ -52,7 +52,7 @@ from backend.core.config import settings
 from backend.semantic_processing.embedding_service import EmbeddingService
 from backend.services.mongo_service import mongo_service
 from backend.services.llm_service import LLMService # 引入LLMService
-from backend.services.audio_description_service import AudioDescriptionService
+# Removed AudioDescriptionService import - using direct Whisper integration instead
 
 logger = logging.getLogger("ml")
 
@@ -707,87 +707,146 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             "file_size_mb": round(file_size / (1024 * 1024), 2)
         }
         
-        # 5. AI-powered audio content analysis
-        ai_analysis = {}
+        # 5. Speech recognition using Whisper (high-accuracy approach)
+        speech_analysis = {}
         try:
-            logger.info("Starting AI analysis for audio content...")
-            audio_service = AudioDescriptionService()
+            logger.info("Starting speech recognition for audio content...")
+            import whisper
             
-            # 准备音频特征数据用于AI分析
-            ai_features = {
-                "duration": audio_features.get("duration_seconds", 0),
-                "sample_rate": audio_features.get("sample_rate", 0),
-                "avg_amplitude": audio_features.get("energy", 0),
-                "max_amplitude": audio_features.get("energy", 0) * 2,  # 估算
-                "avg_spectral_centroid": audio_features.get("spectral_centroid_mean", 0),
-                "avg_zero_crossing_rate": audio_features.get("zero_crossing_rate_mean", 0),
-                "avg_spectral_rolloff": audio_features.get("spectral_rolloff_mean", 0),
-                "mfcc_features": audio_features.get("mfcc_means", []),
-                "tempo": audio_features.get("tempo_bpm", 0),
-                "beat_count": int(audio_features.get("tempo_bpm", 0) * audio_features.get("duration_seconds", 0) / 60) if audio_features.get("tempo_bpm", 0) > 0 else 0
-            }
+            # Load high-accuracy Whisper model for better Chinese recognition
+            logger.info("Loading Whisper Large V3 model for optimal accuracy...")
+            model = whisper.load_model("large-v3")
             
-            # 调用AI分析
-            import asyncio
-            try:
-                ai_result = asyncio.run(audio_service.generate_description(audio_path, ai_features))
-            except Exception as ai_error:
-                logger.error(f"AI analysis failed: {ai_error}")
-                ai_result = {"success": False}
+            # Perform transcription with optimized settings for Chinese
+            logger.info("Performing transcription with Chinese optimization...")
+            # First try Chinese
+            result = model.transcribe(
+                str(audio_path), 
+                language="zh",  # Specify Chinese first
+                word_timestamps=True,
+                temperature=0.0  # Deterministic output
+            )
             
-            if ai_result.get("success"):
-                ai_analysis = {
-                    "ai_description": ai_result.get("description", ""),
-                    "ai_analysis": ai_result.get("parsed_analysis", {}),
-                    "ai_audio_type": ai_result.get("parsed_analysis", {}).get("audio_type", "未知"),
-                    "ai_quality_assessment": ai_result.get("parsed_analysis", {}).get("quality_assessment", "无法评估"),
-                    "ai_feature_tags": ai_result.get("parsed_analysis", {}).get("feature_tags", []),
-                    "ai_usage_scenarios": ai_result.get("parsed_analysis", {}).get("usage_scenarios", []),
-                    "content_type": ai_result.get("content_type", "unknown"),
-                    "speech_recognition": ai_result.get("speech_recognition", {}),
-                    "transcribed_text": ai_result.get("speech_recognition", {}).get("transcribed_text"),
-                    "speech_confidence": ai_result.get("speech_recognition", {}).get("confidence"),
-                    "detected_language": ai_result.get("speech_recognition", {}).get("language_detected")
+            # If Chinese transcription confidence is low, try auto-detect
+            if (not result.get("text") or len(result.get("text", "").strip()) < 10):
+                logger.info("Chinese transcription yielded little content, trying auto-detection...")
+                result = model.transcribe(
+                    str(audio_path), 
+                    language=None,  # Auto-detect language
+                    word_timestamps=True,
+                    temperature=0.0
+                )
+            
+            if result and result.get("text"):
+                # Calculate confidence based on segments (Large V3 improved)
+                segments = result.get("segments", [])
+                total_confidence = 0
+                total_duration = 0
+                word_count = 0
+                
+                # Enhanced confidence calculation for Large V3
+                for segment in segments:
+                    if 'end' in segment and 'start' in segment:
+                        duration = segment['end'] - segment['start']
+                        
+                        # Use avg_logprob for more accurate confidence (available in Large V3)
+                        if 'avg_logprob' in segment:
+                            # Convert log probability to confidence (approximate)
+                            confidence = max(0.0, min(1.0, np.exp(segment['avg_logprob'])))
+                        elif 'confidence' in segment:
+                            confidence = segment.get('confidence', 0)
+                        else:
+                            # Fallback: estimate confidence based on text length
+                            text_length = len(segment.get('text', ''))
+                            confidence = min(0.9, text_length / 50.0)  # Rough estimate
+                        
+                        total_confidence += confidence * duration
+                        total_duration += duration
+                        
+                        # Count words for additional metrics
+                        words = segment.get('words', [])
+                        if words:
+                            word_count += len(words)
+                        else:
+                            # Estimate word count from text
+                            word_count += len(segment.get('text', '').split())
+                
+                avg_confidence = total_confidence / total_duration if total_duration > 0 else 0
+                
+                # Additional quality metrics
+                text_length = len(result["text"].strip())
+                words_per_minute = (word_count / (total_duration / 60)) if total_duration > 0 else 0
+                
+                speech_analysis = {
+                    "success": True,
+                    "transcribed_text": result["text"].strip(),
+                    "language_detected": result.get("language", "unknown"),
+                    "confidence": round(avg_confidence, 3),
+                    "segments_count": len(segments),
+                    "word_count": word_count,
+                    "words_per_minute": round(words_per_minute, 1),
+                    "text_length": text_length,
+                    "model_info": {
+                        "model": "large-v3",
+                        "multilingual": True,
+                        "parameters": "1550M"
+                    }
                 }
-                logger.info("AI audio analysis completed successfully")
+                logger.info(f"Speech recognition completed: {len(result['text'])} characters transcribed")
             else:
-                logger.warning(f"AI audio analysis failed: {ai_result.get('error')}")
-                ai_analysis = {
-                    "ai_description": "AI分析失败",
-                    "ai_error": ai_result.get("error", "未知错误")
+                speech_analysis = {
+                    "success": False,
+                    "error": "No speech content detected",
+                    "transcribed_text": "",
+                    "language_detected": "unknown",
+                    "confidence": 0
                 }
                 
         except Exception as e:
-            logger.error(f"AI audio analysis failed with exception: {e}", exc_info=True)
-            ai_analysis = {
-                "ai_description": "AI分析遇到技术问题",
-                "ai_error": str(e)
+            logger.error(f"Speech recognition failed: {e}", exc_info=True)
+            speech_analysis = {
+                "success": False,
+                "error": str(e),
+                "transcribed_text": "",
+                "language_detected": "unknown", 
+                "confidence": 0
             }
         
-        # 6. Enhanced analysis summary with AI insights
+        # 6. Enhanced analysis summary with rule-based classification
         enhanced_summary = analysis_summary.copy()
         
-        # 使用AI分析结果增强摘要（如果可用）
-        if ai_analysis.get("ai_audio_type") and ai_analysis["ai_audio_type"] != "未知":
-            enhanced_summary["audio_type"] = ai_analysis["ai_audio_type"]
+        # Rule-based audio type classification
+        audio_type = "未知"
+        if speech_analysis.get("success") and speech_analysis.get("transcribed_text"):
+            if len(speech_analysis["transcribed_text"]) > 50:
+                audio_type = "语音/对话"
+            else:
+                audio_type = "可能包含语音"
+        elif audio_features.get("tempo_bpm", 0) > 120:
+            audio_type = "快节奏音乐"
+        elif audio_features.get("tempo_bpm", 0) > 80:
+            audio_type = "中等节奏音乐"
+        elif audio_features.get("tempo_bpm", 0) > 0:
+            audio_type = "慢节奏音乐"
+        elif audio_features.get("energy", 0) < 0.01:
+            audio_type = "安静音频"
         else:
-            # Fallback to rule-based classification
-            audio_type = "未知"
-            if audio_features.get("tempo_bpm", 0) > 120:
-                audio_type = "快节奏音乐"
-            elif audio_features.get("tempo_bpm", 0) > 80:
-                audio_type = "中等节奏音乐"
-            elif audio_features.get("tempo_bpm", 0) > 0:
-                audio_type = "慢节奏音乐"
-            
-            if audio_features.get("energy", 0) < 0.01:
-                audio_type = "语音/安静音频"
-            
-            enhanced_summary["audio_type"] = audio_type
+            audio_type = "音频内容"
         
-        # 添加AI分析的质量评估
-        if ai_analysis.get("ai_quality_assessment"):
-            enhanced_summary["audio_quality"] = ai_analysis["ai_quality_assessment"]
+        enhanced_summary["audio_type"] = audio_type
+        
+        # Basic quality assessment based on technical features
+        sample_rate = audio_features.get("sample_rate", 0)
+        energy = audio_features.get("energy", 0)
+        
+        if sample_rate >= 44100 and energy > 0.02:
+            audio_quality = "高质量"
+        elif sample_rate >= 22050 and energy > 0.01:
+            audio_quality = "中等质量"
+        else:
+            audio_quality = "低质量"
+            
+        enhanced_summary["audio_quality"] = audio_quality
         
         # Combine all results
         result = {
@@ -800,7 +859,7 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             "metadata": metadata,
             "audio_properties": {**audio_info, **audio_features},
             "analysis_summary": enhanced_summary,
-            "ai_analysis": ai_analysis  # 新增AI分析结果
+            "speech_recognition": speech_analysis  # Whisper语音识别结果
         }
         
         logger.info(f"Audio analysis completed successfully for {audio_path}")

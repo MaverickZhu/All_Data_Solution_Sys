@@ -58,6 +58,7 @@ ffmpeg-python==0.2.0
 # Speech Recognition
 speechrecognition==3.10.0
 pydub==0.25.1
+openai-whisper==20240930
 
 # Vector DB
 pymilvus

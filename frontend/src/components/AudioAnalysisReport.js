@@ -31,7 +31,7 @@ const AudioAnalysisReport = ({ result }) => {
         return <div className="text-center text-slate-400 py-10">音频分析数据不可用或格式错误。</div>;
     }
 
-    const { file_info, metadata, audio_properties, analysis_summary, ai_analysis } = result;
+    const { file_info, metadata, audio_properties, analysis_summary, speech_recognition } = result;
     const hasError = result.error;
 
     if (hasError) {
@@ -216,166 +216,117 @@ const AudioAnalysisReport = ({ result }) => {
                     </div>
                 )}
 
-                {/* AI Analysis Results */}
-                {ai_analysis && ai_analysis.ai_description && (
-                    <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 p-6 rounded-2xl border border-purple-500/20">
+                {/* Speech Recognition Results */}
+                {speech_recognition && (
+                    <div className="bg-gradient-to-r from-green-900/20 to-teal-900/20 p-6 rounded-2xl border border-green-500/20">
                         <h4 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                            <span className="text-2xl">🤖</span>
-                            AI智能分析
+                            <span className="text-2xl">🎤</span>
+                            语音识别结果
                         </h4>
                         
-                        {/* AI Description */}
-                        <div className="bg-slate-800/50 p-4 rounded-lg mb-4">
-                            <h5 className="text-sm font-medium text-sky-400 mb-2">智能内容分析</h5>
-                            <p className="text-slate-200 text-sm leading-relaxed">
-                                {ai_analysis.ai_description}
-                            </p>
-                        </div>
-
-                        {/* AI Analysis Results Grid */}
-                        {ai_analysis.ai_analysis && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {/* Audio Type Classification */}
-                                {ai_analysis.ai_audio_type && (
-                                    <div className="bg-slate-800/50 p-4 rounded-lg">
-                                        <h5 className="text-sm font-medium text-sky-400 mb-2">音频类型</h5>
-                                        <div className="flex items-center gap-2">
-                                            <span className="px-2 py-1 bg-blue-500/20 border border-blue-500/30 rounded text-blue-300 text-sm">
-                                                {ai_analysis.ai_audio_type}
-                                            </span>
-                                        </div>
+                        {speech_recognition.success ? (
+                            <div className="space-y-4">
+                                {/* Transcribed Text */}
+                                {speech_recognition.transcribed_text && (
+                                    <div className="bg-black/30 p-4 rounded-lg">
+                                        <h5 className="text-sm font-medium text-green-400 mb-2">转录文本</h5>
+                                        <p className="text-slate-200 text-sm italic leading-relaxed border-l-2 border-green-500/30 pl-3">
+                                            "{speech_recognition.transcribed_text}"
+                                        </p>
                                     </div>
                                 )}
-
-                                {/* Quality Assessment */}
-                                {ai_analysis.ai_quality_assessment && (
-                                    <div className="bg-slate-800/50 p-4 rounded-lg">
-                                        <h5 className="text-sm font-medium text-sky-400 mb-2">质量评估</h5>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`px-2 py-1 rounded text-sm ${
-                                                ai_analysis.ai_quality_assessment.includes('高') ? 'bg-green-500/20 border border-green-500/30 text-green-300' :
-                                                ai_analysis.ai_quality_assessment.includes('良') ? 'bg-yellow-500/20 border border-yellow-500/30 text-yellow-300' :
-                                                'bg-orange-500/20 border border-orange-500/30 text-orange-300'
-                                            }`}>
-                                                {ai_analysis.ai_quality_assessment}
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Feature Tags */}
-                                {ai_analysis.ai_feature_tags && ai_analysis.ai_feature_tags.length > 0 && (
-                                    <div className="bg-slate-800/50 p-4 rounded-lg">
-                                        <h5 className="text-sm font-medium text-sky-400 mb-2">音频特征</h5>
-                                        <div className="flex flex-wrap gap-2">
-                                            {ai_analysis.ai_feature_tags.map((tag, index) => (
-                                                <span key={index} className="px-2 py-1 bg-purple-500/20 border border-purple-500/30 rounded text-purple-300 text-xs">
-                                                    {tag}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Usage Scenarios */}
-                                {ai_analysis.ai_usage_scenarios && ai_analysis.ai_usage_scenarios.length > 0 && (
-                                    <div className="bg-slate-800/50 p-4 rounded-lg">
-                                        <h5 className="text-sm font-medium text-sky-400 mb-2">适用场景</h5>
-                                        <div className="space-y-1">
-                                            {ai_analysis.ai_usage_scenarios.map((scenario, index) => (
-                                                <div key={index} className="text-slate-300 text-sm flex items-center gap-2">
-                                                    <span className="text-sky-400">•</span>
-                                                    {scenario}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Speech Recognition Results */}
-                        {ai_analysis && (ai_analysis.transcribed_text || ai_analysis.speech_recognition) && (
-                            <div className="bg-gradient-to-r from-green-900/20 to-teal-900/20 p-4 rounded-lg border border-green-500/20 mt-4">
-                                <h5 className="text-sm font-medium text-green-400 mb-3 flex items-center gap-2">
-                                    <span className="text-lg">🎤</span>
-                                    语音识别结果
-                                </h5>
                                 
-                                {ai_analysis.transcribed_text ? (
-                                    <div className="space-y-3">
-                                        {/* Transcribed Text */}
-                                        <div className="bg-black/30 p-3 rounded-lg">
-                                            <h6 className="text-xs font-medium text-green-300 mb-2">转录文本</h6>
-                                            <p className="text-slate-200 text-sm italic leading-relaxed border-l-2 border-green-500/30 pl-3">
-                                                "{ai_analysis.transcribed_text}"
-                                            </p>
+                                {/* Recognition Details */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                    {speech_recognition.confidence !== undefined && (
+                                        <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                            <div className="text-xs text-slate-400 mb-1">识别置信度</div>
+                                            <div className={`text-sm font-semibold ${
+                                                speech_recognition.confidence > 0.8 ? 'text-green-300' :
+                                                speech_recognition.confidence > 0.5 ? 'text-yellow-300' :
+                                                'text-orange-300'
+                                            }`}>
+                                                {Math.round(speech_recognition.confidence * 100)}%
+                                            </div>
                                         </div>
+                                    )}
+                                    
+                                    {speech_recognition.language_detected && (
+                                        <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                            <div className="text-xs text-slate-400 mb-1">检测语言</div>
+                                            <div className="text-sm font-semibold text-blue-300">
+                                                {speech_recognition.language_detected === 'zh' ? '中文' :
+                                                 speech_recognition.language_detected === 'en' ? '英文' : 
+                                                 speech_recognition.language_detected}
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {speech_recognition.segments_count !== undefined && (
+                                        <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                            <div className="text-xs text-slate-400 mb-1">音频段数</div>
+                                            <div className="text-sm font-semibold text-purple-300">
+                                                {speech_recognition.segments_count} 段
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {speech_recognition.word_count !== undefined && (
+                                        <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                            <div className="text-xs text-slate-400 mb-1">词汇总数</div>
+                                            <div className="text-sm font-semibold text-indigo-300">
+                                                {speech_recognition.word_count} 词
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {/* Additional metrics if available */}
+                                {(speech_recognition.words_per_minute || speech_recognition.text_length) && (
+                                    <div className="grid grid-cols-2 gap-4 mt-4">
+                                        {speech_recognition.words_per_minute && (
+                                            <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                                <div className="text-xs text-slate-400 mb-1">语速</div>
+                                                <div className="text-sm font-semibold text-cyan-300">
+                                                    {speech_recognition.words_per_minute} 词/分
+                                                </div>
+                                            </div>
+                                        )}
                                         
-                                        {/* Recognition Details */}
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                            {ai_analysis.speech_confidence && (
-                                                <div className="text-center">
-                                                    <div className="text-xs text-slate-400">识别置信度</div>
-                                                    <div className={`text-sm font-semibold ${
-                                                        ai_analysis.speech_confidence === 'high' ? 'text-green-300' :
-                                                        ai_analysis.speech_confidence === 'medium' ? 'text-yellow-300' :
-                                                        'text-orange-300'
-                                                    }`}>
-                                                        {ai_analysis.speech_confidence === 'high' ? '高' :
-                                                         ai_analysis.speech_confidence === 'medium' ? '中' : '低'}
-                                                    </div>
+                                        {speech_recognition.text_length && (
+                                            <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                                <div className="text-xs text-slate-400 mb-1">文本长度</div>
+                                                <div className="text-sm font-semibold text-emerald-300">
+                                                    {speech_recognition.text_length} 字符
                                                 </div>
-                                            )}
-                                            
-                                            {ai_analysis.detected_language && (
-                                                <div className="text-center">
-                                                    <div className="text-xs text-slate-400">检测语言</div>
-                                                    <div className="text-sm font-semibold text-blue-300">
-                                                        {ai_analysis.detected_language === 'zh-CN' ? '中文' :
-                                                         ai_analysis.detected_language === 'en-US' ? '英文' : ai_analysis.detected_language}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            
-                                            {ai_analysis.content_type && (
-                                                <div className="text-center">
-                                                    <div className="text-xs text-slate-400">内容类型</div>
-                                                    <div className="text-sm font-semibold text-purple-300">
-                                                        {ai_analysis.content_type === 'speech' ? '语音' :
-                                                         ai_analysis.content_type === 'music' ? '音乐' :
-                                                         ai_analysis.content_type === 'sound_effect' ? '音效' : ai_analysis.content_type}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="bg-slate-800/50 p-3 rounded-lg">
-                                        <div className="text-slate-400 text-sm flex items-center gap-2">
-                                            <span>🔇</span>
-                                            <span>此音频未检测到语音内容或语音识别失败</span>
-                                        </div>
-                                        {ai_analysis.speech_recognition?.error && (
-                                            <div className="text-slate-500 text-xs mt-2">
-                                                原因：{ai_analysis.speech_recognition.error}
                                             </div>
                                         )}
                                     </div>
                                 )}
-                            </div>
-                        )}
 
-                        {/* AI Error Handling */}
-                        {ai_analysis.ai_error && (
-                            <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className="text-amber-400">⚠️</span>
-                                    <span className="text-amber-300 font-semibold">AI分析遇到问题</span>
+                                {/* Model Information */}
+                                {speech_recognition.model_info && (
+                                    <div className="bg-slate-800/50 p-3 rounded-lg">
+                                        <h5 className="text-sm font-medium text-sky-400 mb-2">模型信息</h5>
+                                        <div className="text-xs text-slate-300">
+                                            使用 Whisper {speech_recognition.model_info.model} 模型
+                                            {speech_recognition.model_info.parameters && ` (${speech_recognition.model_info.parameters}参数)`}
+                                            {speech_recognition.model_info.multilingual && " · 支持多语言"}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="bg-slate-800/50 p-4 rounded-lg">
+                                <div className="text-slate-400 text-sm flex items-center gap-2 mb-2">
+                                    <span>🔇</span>
+                                    <span>此音频未检测到语音内容或语音识别失败</span>
                                 </div>
-                                <p className="text-amber-200 text-sm">
-                                    {ai_analysis.ai_error}
-                                </p>
+                                {speech_recognition.error && (
+                                    <div className="text-slate-500 text-xs">
+                                        原因：{speech_recognition.error}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
