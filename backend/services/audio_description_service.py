@@ -7,15 +7,20 @@ import numpy as np
 import tempfile
 import os
 import whisper
+from .audio_enhancement import audio_enhancement_service
+from .text_optimization_service import TextOptimizationService
 
 logger = logging.getLogger(__name__)
 
 class AudioDescriptionService:
     """音频语音识别服务，使用Whisper模型进行语音转文字"""
     
-    def __init__(self, whisper_model: str = "base"):
+    def __init__(self, whisper_model: str = "base", enable_preprocessing: bool = True):
         self.whisper_model_name = whisper_model
         self._whisper_model = None  # Lazy loading
+        self.enable_preprocessing = enable_preprocessing
+        self.text_optimizer = TextOptimizationService()
+        logger.info(f"🎵 音频分析服务初始化，模型: {whisper_model}, 预处理: {enable_preprocessing}")
     
     def _get_whisper_model(self):
         """懒加载Whisper模型"""
@@ -84,17 +89,57 @@ class AudioDescriptionService:
             return {}
     
     def speech_to_text(self, audio_path: Path) -> Dict:
-        """使用Whisper进行语音识别，将音频转换为文字"""
+        """使用Whisper进行语音识别，将音频转换为文字，可选音频预处理"""
         try:
-            logger.info(f"Starting Whisper speech recognition for {audio_path}")
+            logger.info(f"🎯 开始语音识别处理: {audio_path}")
+            
+            # 音频预处理和去噪
+            processed_audio_path = audio_path
+            preprocessing_info = {}
+            
+            if self.enable_preprocessing:
+                try:
+                    logger.info("🔧 执行音频预处理...")
+                    
+                    # 分析音频噪声水平
+                    noise_analysis = audio_enhancement_service.analyze_noise_level(audio_path)
+                    preprocessing_info["noise_analysis"] = noise_analysis
+                    
+                    # 根据噪声水平决定是否进行去噪
+                    if noise_analysis.get("enhancement_recommended", True):
+                        logger.info(f"📊 检测到噪声水平: {noise_analysis.get('noise_level', 'unknown')}, 开始去噪处理...")
+                        
+                        # 执行音频增强管道
+                        processed_audio_path = audio_enhancement_service.enhance_audio_pipeline(
+                            audio_path,
+                            enable_denoise=True,
+                            enable_bandpass=True,
+                            enable_silence_removal=True,
+                            enable_normalization=True
+                        )
+                        
+                        preprocessing_info["enhancement_applied"] = True
+                        preprocessing_info["enhanced_file"] = str(processed_audio_path)
+                        logger.info(f"✅ 音频预处理完成，使用增强音频: {processed_audio_path.name}")
+                    else:
+                        logger.info("🎵 音频质量良好，跳过预处理")
+                        preprocessing_info["enhancement_applied"] = False
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ 音频预处理失败，使用原始音频: {e}")
+                    processed_audio_path = audio_path
+                    preprocessing_info["enhancement_applied"] = False
+                    preprocessing_info["preprocessing_error"] = str(e)
             
             # 获取Whisper模型
             model = self._get_whisper_model()
             
+            logger.info(f"🎙️ 开始Whisper语音识别...")
+            
             # 使用Whisper进行转录
             # Whisper会自动处理音频格式转换和预处理
             result = model.transcribe(
-                str(audio_path),
+                str(processed_audio_path),
                 language="zh",  # 首先尝试中文
                 task="transcribe",  # 转录任务（而非翻译）
                 verbose=False
@@ -154,9 +199,23 @@ class AudioDescriptionService:
                 
                 avg_confidence = total_confidence / total_duration if total_duration > 0 else 0
                 
-                return {
+                # 应用文本优化
+                logger.info(f"🧠 开始文本优化：原始文本长度 {len(transcribed_text)} 字符")
+                text_optimization_result = self.text_optimizer.optimize_speech_text(
+                    transcribed_text, 
+                    detected_language
+                )
+                logger.info(f"🧠 文本优化完成：成功={text_optimization_result.get('success')}, 优化后长度={len(text_optimization_result.get('optimized_text', ''))}")
+                logger.info(f"🧠 应用改进：{text_optimization_result.get('improvements', [])}")
+                
+                # 构建返回结果，包含预处理信息和文本优化信息
+                optimized_text = text_optimization_result.get("optimized_text", transcribed_text)
+                logger.info(f"🎯 最终文本对比：原始='{transcribed_text[:50]}...' 优化='{optimized_text[:50]}...'")
+                
+                speech_result = {
                     "success": True,
-                    "transcribed_text": transcribed_text,
+                    "transcribed_text": optimized_text,  # 使用优化后的文本
+                    "raw_text": transcribed_text,  # 保留原始识别文本
                     "confidence": round(avg_confidence, 3),
                     "language_detected": detected_language,
                     "segments": segments,
@@ -164,8 +223,22 @@ class AudioDescriptionService:
                     "model_info": {
                         "model": self.whisper_model_name,
                         "multilingual": model.is_multilingual
-                    }
+                    },
+                    "preprocessing_info": preprocessing_info,
+                    "text_optimization": text_optimization_result
                 }
+                
+                # 清理临时文件
+                if (self.enable_preprocessing and 
+                    preprocessing_info.get("enhancement_applied") and 
+                    processed_audio_path != audio_path):
+                    try:
+                        os.unlink(processed_audio_path)
+                        logger.info(f"🗑️ 清理临时增强音频文件: {processed_audio_path.name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 清理临时文件失败: {e}")
+                
+                return speech_result
             else:
                 return {
                     "success": False,

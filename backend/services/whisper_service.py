@@ -8,6 +8,7 @@ import torch
 import whisper
 from pathlib import Path
 from typing import Dict, Any, Optional
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +50,17 @@ class WhisperService:
     def model(self):
         """获取模型实例，懒加载"""
         if self._model is None:
-            logger.info("🎯 Loading Whisper Large V3 model (pre-downloaded for instant access)...")
+            logger.info("🎯 Loading Whisper model...")
             start_time = time.time()
             
             try:
+                # 优先使用Turbo模型提升速度（可通过环境变量配置）
+                model_name = os.getenv("WHISPER_MODEL", "turbo")  # 默认使用turbo
+                
                 if self.device == "cuda":
                     # GPU模式：加载模型到GPU，让Whisper自己处理精度
-                    logger.info("🔥 GPU模式启动中...")
-                    self._model = whisper.load_model("large-v3", device=self.device)
+                    logger.info(f"🔥 GPU模式启动中，使用模型: {model_name}")
+                    self._model = whisper.load_model(model_name, device=self.device)
                     
                     # 验证GPU使用情况，但不手动转换精度
                     gpu_memory = torch.cuda.memory_allocated() / 1024**3
@@ -65,19 +69,19 @@ class WhisperService:
                     
                 else:
                     # CPU模式
-                    logger.info("💻 CPU模式启动中...")
-                    self._model = whisper.load_model("large-v3", device=self.device)
+                    logger.info(f"💻 CPU模式启动中，使用模型: {model_name}")
+                    self._model = whisper.load_model(model_name, device=self.device)
                 
                 load_time = time.time() - start_time
-                logger.info(f"🎉 Whisper模型加载成功，耗时 {load_time:.2f}秒，设备: {self.device}")
+                logger.info(f"🎉 Whisper模型({model_name})加载成功，耗时 {load_time:.2f}秒，设备: {self.device}")
                 
             except Exception as e:
                 logger.error(f"❌ 模型加载失败: {e}")
-                # 降级到Turbo模型
-                logger.info("🔄 降级到Turbo模型...")
-                self._model = whisper.load_model("turbo", device=self.device)
+                # 降级到base模型
+                logger.info("🔄 降级到base模型...")
+                self._model = whisper.load_model("base", device=self.device)
                 load_time = time.time() - start_time
-                logger.info(f"✅ Turbo模型加载成功，耗时 {load_time:.2f}秒")
+                logger.info(f"✅ Base模型加载成功，耗时 {load_time:.2f}秒")
         
         return self._model
     
@@ -95,7 +99,9 @@ class WhisperService:
         try:
             start_time = time.time()
             
-            logger.info(f"🎵 开始转录音频: {audio_path.name}")
+            # 支持字符串路径和Path对象
+            audio_name = audio_path.name if hasattr(audio_path, 'name') else str(audio_path).split('/')[-1]
+            logger.info(f"🎵 开始转录音频: {audio_name}")
             logger.info(f"🔧 使用设备: {self.device}")
             
             # 获取模型并验证GPU状态
@@ -107,20 +113,20 @@ class WhisperService:
                 # 设置GPU设备
                 torch.cuda.set_device(0)
             
-            # 转录配置优化
+            # 转录配置优化（防止重复循环）
             transcribe_options = {
                 "language": language,
                 "task": "transcribe",
                 "fp16": gpu_enabled,  # 仅在GPU时使用FP16
                 "verbose": False,
-                # 优化参数以提升中文识别
-                "beam_size": 3 if gpu_enabled else 1,
-                "best_of": 3 if gpu_enabled else 1,
-                "temperature": 0.0,
-                "compression_ratio_threshold": 2.4,
-                "logprob_threshold": -1.0,
-                "no_speech_threshold": 0.6,
-                "condition_on_previous_text": True,
+                # 优化参数：防止重复循环
+                "beam_size": 1,  # 降低为1，减少重复可能性
+                "best_of": 1,  # 降低为1，减少重复可能性
+                "temperature": 0.2,  # 增加一点随机性，防止卡住
+                "compression_ratio_threshold": 2.0,  # 降低阈值，减少重复
+                "logprob_threshold": -0.8,  # 提高阈值，减少低质量重复
+                "no_speech_threshold": 0.8,  # 提高阈值，更严格的静音检测
+                "condition_on_previous_text": False,  # 禁用上下文依赖，防止重复循环
             }
             
             logger.info(f"🔧 转录配置: {transcribe_options}")

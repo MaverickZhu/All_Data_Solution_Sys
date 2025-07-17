@@ -54,6 +54,8 @@ scipy>=1.13.0
 mutagen==1.47.0
 opencv-python-headless>=4.9.0
 ffmpeg-python==0.2.0
+soundfile>=0.12.1
+resampy>=0.4.2  # 音频重采样，librosa依赖
 
 # Speech Recognition
 speechrecognition==3.10.0

@@ -216,6 +216,167 @@ const AudioAnalysisReport = ({ result }) => {
                     </div>
                 )}
 
+                {/* Audio Preprocessing Information */}
+                {speech_recognition?.preprocessing_info && (
+                    <div className="bg-gradient-to-r from-purple-900/20 to-indigo-900/20 p-6 rounded-2xl border border-purple-500/20">
+                        <h4 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <span className="text-2xl">🔧</span>
+                            音频预处理与增强
+                            {speech_recognition.preprocessing_info.enhancement_applied && (
+                                <span className="bg-purple-500/20 text-purple-300 px-2 py-1 rounded text-sm ml-2">
+                                    ✨ 已增强
+                                </span>
+                            )}
+                        </h4>
+                        
+                        <div className="space-y-4">
+                            {/* Noise Analysis */}
+                            {speech_recognition.preprocessing_info.noise_analysis && (
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <h5 className="text-sm font-medium text-purple-400 mb-3">噪声分析</h5>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                        <div className="text-center">
+                                            <div className="text-xs text-slate-400">信噪比</div>
+                                            <div className={`text-sm font-semibold ${
+                                                speech_recognition.preprocessing_info.noise_analysis.estimated_snr_db > 20 ? 'text-green-300' :
+                                                speech_recognition.preprocessing_info.noise_analysis.estimated_snr_db > 10 ? 'text-yellow-300' :
+                                                'text-red-300'
+                                            }`}>
+                                                {speech_recognition.preprocessing_info.noise_analysis.estimated_snr_db?.toFixed(1)} dB
+                                            </div>
+                                        </div>
+                                        <div className="text-center">
+                                            <div className="text-xs text-slate-400">噪声水平</div>
+                                            <div className={`text-sm font-semibold ${
+                                                speech_recognition.preprocessing_info.noise_analysis.noise_level === 'low' ? 'text-green-300' :
+                                                speech_recognition.preprocessing_info.noise_analysis.noise_level === 'medium' ? 'text-yellow-300' :
+                                                'text-red-300'
+                                            }`}>
+                                                {speech_recognition.preprocessing_info.noise_analysis.noise_level === 'low' ? '低' :
+                                                 speech_recognition.preprocessing_info.noise_analysis.noise_level === 'medium' ? '中' :
+                                                 speech_recognition.preprocessing_info.noise_analysis.noise_level === 'high' ? '高' : '未知'}
+                                            </div>
+                                        </div>
+                                        <div className="text-center">
+                                            <div className="text-xs text-slate-400">频谱平坦度</div>
+                                            <div className="text-sm font-semibold text-blue-300">
+                                                {speech_recognition.preprocessing_info.noise_analysis.spectral_flatness?.toFixed(3)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Enhancement Status */}
+                            <div className="bg-black/30 p-4 rounded-lg">
+                                <h5 className="text-sm font-medium text-purple-400 mb-3">增强处理状态</h5>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-slate-400">去噪处理</span>
+                                        <span className={`text-sm ${speech_recognition.preprocessing_info.enhancement_applied ? 'text-green-300' : 'text-slate-400'}`}>
+                                            {speech_recognition.preprocessing_info.enhancement_applied ? '✅ 已应用' : '⏭️ 已跳过'}
+                                        </span>
+                                    </div>
+                                    {speech_recognition.preprocessing_info.preprocessing_error && (
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-400">处理错误</span>
+                                            <span className="text-sm text-red-300">⚠️ {speech_recognition.preprocessing_info.preprocessing_error}</span>
+                                                                    </div>
+                        )}
+
+                        {/* 新增：智能文本优化结果展示 */}
+                        {result.text_optimization && (
+                            <div className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 p-6 rounded-lg border border-purple-500/30 shadow-lg">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h4 className="text-lg font-semibold text-purple-400 flex items-center gap-2">
+                                        <span className="text-2xl">🧠</span>
+                                        智能文本优化
+                                    </h4>
+                                    {result.text_optimization.success && (
+                                        <span className="text-xs bg-purple-600/20 text-purple-300 px-3 py-1 rounded-full border border-purple-500/30">
+                                            ✨ AI优化完成
+                                        </span>
+                                    )}
+                                </div>
+
+                                {result.text_optimization.success ? (
+                                    <div className="space-y-4">
+                                        {/* 优化后的文本 */}
+                                        <div className="bg-black/30 p-4 rounded-lg border border-purple-500/20">
+                                            <h5 className="text-sm font-medium text-purple-400 mb-2">优化后文本</h5>
+                                            <div className="text-slate-200 leading-relaxed whitespace-pre-wrap">
+                                                {result.text_optimization.optimized_text}
+                                            </div>
+                                        </div>
+
+                                        {/* 优化统计信息 */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                            <div className="bg-black/20 p-3 rounded-lg border border-purple-500/20 text-center">
+                                                <div className="text-purple-300 font-medium">文本精简</div>
+                                                <div className="text-xl font-bold text-purple-400">
+                                                    {result.text_optimization.reduction_rate || 0}%
+                                                </div>
+                                            </div>
+                                            <div className="bg-black/20 p-3 rounded-lg border border-purple-500/20 text-center">
+                                                <div className="text-purple-300 font-medium">应用改进</div>
+                                                <div className="text-xl font-bold text-purple-400">
+                                                    {result.text_optimization.improvements?.length || 0}项
+                                                </div>
+                                            </div>
+                                            <div className="bg-black/20 p-3 rounded-lg border border-purple-500/20 text-center">
+                                                <div className="text-purple-300 font-medium">处理时间</div>
+                                                <div className="text-xl font-bold text-purple-400">
+                                                    {result.text_optimization.optimization_time || 0}ms
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 应用的改进措施 */}
+                                        {result.text_optimization.improvements && result.text_optimization.improvements.length > 0 && (
+                                            <div className="bg-black/20 p-4 rounded-lg border border-purple-500/20">
+                                                <h5 className="text-sm font-medium text-purple-400 mb-2">应用的优化措施</h5>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {result.text_optimization.improvements.map((improvement, index) => (
+                                                        <span
+                                                            key={index}
+                                                            className="px-2 py-1 bg-purple-600/20 text-purple-300 rounded-full text-xs border border-purple-500/30"
+                                                        >
+                                                            {improvement}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* 原始文本对比（可展开） */}
+                                        <details className="bg-black/20 p-4 rounded-lg border border-purple-500/20">
+                                            <summary className="text-sm font-medium text-purple-400 cursor-pointer">
+                                                📋 查看原始识别文本对比
+                                            </summary>
+                                            <div className="mt-3 p-3 bg-black/30 rounded border border-gray-600">
+                                                <div className="text-gray-400 text-xs mb-2">原始文本（{result.text_optimization.raw_text?.length || 0} 字符）：</div>
+                                                <div className="text-gray-300 text-sm whitespace-pre-wrap opacity-75">
+                                                    {result.text_optimization.raw_text}
+                                                </div>
+                                            </div>
+                                        </details>
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-4">
+                                        <div className="text-red-400 mb-2">❌ 文本优化失败</div>
+                                        <div className="text-sm text-gray-400">
+                                            {result.text_optimization.error || "未知错误"}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Enhanced Speech Recognition Results */}
                 {speech_recognition && (
                     <div className="bg-gradient-to-r from-green-900/20 to-teal-900/20 p-6 rounded-2xl border border-green-500/20">
@@ -240,29 +401,79 @@ const AudioAnalysisReport = ({ result }) => {
                                 {speech_recognition.transcribed_text && (
                                     <div className="bg-black/30 p-5 rounded-lg border border-green-500/20">
                                         <div className="flex items-center justify-between mb-3">
-                                            <h5 className="text-sm font-medium text-green-400">增强转录文本</h5>
-                                            {speech_recognition.enhancement_info?.enhancement_successful && (
+                                            <h5 className="text-sm font-medium text-green-400">✨ 智能优化转录文本</h5>
+                                            {speech_recognition.text_optimization?.success && (
                                                 <span className="text-xs bg-green-600/20 text-green-300 px-2 py-1 rounded-full">
-                                                    ✨ AI增强
+                                                    🧠 文本优化
                                                 </span>
                                             )}
                                         </div>
                                         <div className="text-slate-200 text-sm leading-relaxed border-l-2 border-green-500/30 pl-4">
-                                            {speech_recognition.transcribed_text.split('\n').map((line, index) => (
-                                                <p key={index} className="mb-2 last:mb-0">
-                                                    {line.trim() && `"${line.trim()}"`}
-                                                </p>
+                                            {speech_recognition.transcribed_text.split('\n\n').map((paragraph, pIndex) => (
+                                                <div key={pIndex} className="mb-4 last:mb-0">
+                                                    {paragraph.split('\n').map((sentence, sIndex) => (
+                                                        <p key={sIndex} className="mb-1 last:mb-0">
+                                                            {sentence.trim()}
+                                                        </p>
+                                                    ))}
+                                                </div>
                                             ))}
                                         </div>
                                         
-                                        {/* Show original text comparison if enhanced */}
+                                        {/* Text Optimization Information */}
+                                        {speech_recognition.text_optimization?.success && speech_recognition.text_optimization.improvements && speech_recognition.text_optimization.improvements.length > 0 && (
+                                            <div className="mt-4 p-3 bg-blue-900/20 rounded-lg border border-blue-500/20">
+                                                <h6 className="text-xs font-medium text-blue-400 mb-2">应用的优化:</h6>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {speech_recognition.text_optimization.improvements.map((improvement, index) => (
+                                                        <span key={index} className="text-xs bg-blue-600/20 text-blue-300 px-2 py-1 rounded-full">
+                                                            {improvement}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                
+                                                {/* Optimization Statistics */}
+                                                {speech_recognition.text_optimization.statistics && (
+                                                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                                        <div className="bg-slate-800/30 p-2 rounded">
+                                                            <div className="text-slate-400">句子数</div>
+                                                            <div className="text-white font-medium">
+                                                                {speech_recognition.text_optimization.statistics.sentence_count || 0}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-slate-800/30 p-2 rounded">
+                                                            <div className="text-slate-400">段落数</div>
+                                                            <div className="text-white font-medium">
+                                                                {speech_recognition.text_optimization.statistics.paragraph_count || 0}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-slate-800/30 p-2 rounded">
+                                                            <div className="text-slate-400">原始字数</div>
+                                                            <div className="text-white font-medium">
+                                                                {speech_recognition.text_optimization.statistics.original_word_count || 0}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-slate-800/30 p-2 rounded">
+                                                            <div className="text-slate-400">优化字数</div>
+                                                            <div className="text-white font-medium">
+                                                                {speech_recognition.text_optimization.statistics.optimized_word_count || 0}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        
+                                        {/* Show original text comparison if optimized */}
                                         {speech_recognition.raw_text && speech_recognition.raw_text !== speech_recognition.transcribed_text && (
                                             <details className="mt-4">
                                                 <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300">
                                                     查看原始识别文本
                                                 </summary>
                                                 <div className="mt-2 p-3 bg-slate-800/50 rounded text-xs text-slate-400 border-l-2 border-slate-600 pl-3">
-                                                    "{speech_recognition.raw_text}"
+                                                    <div className="leading-relaxed">
+                                                        {speech_recognition.raw_text}
+                                                    </div>
                                                 </div>
                                             </details>
                                         )}

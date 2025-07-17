@@ -185,6 +185,23 @@ const DataSourceDetail = () => {
                             </div>
                         )}
                         
+                        {reportData && (taskStatus !== 'in_progress' && taskStatus !== 'pending') && (
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-2">
+                                    <span className="h-2 w-2 rounded-full bg-green-400"></span>
+                                    <span className="text-green-300 font-medium">分析已完成</span>
+                                </div>
+                                <Button 
+                                    onClick={handleStartProfiling} 
+                                    disabled={taskStatus === 'in_progress' || taskStatus === 'pending'}
+                                    variant="secondary"
+                                    size="sm"
+                                >
+                                    🔄 重新分析
+                                </Button>
+                            </div>
+                        )}
+                        
                         {(taskStatus === 'in_progress' || taskStatus === 'pending') && (
                              <div className="flex flex-col items-center justify-center gap-4 p-8 bg-sky-500/10 rounded-lg border border-sky-500/20">
                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-sky-400"></div>

@@ -1,96 +1,131 @@
-# Version control
-.git
+# 🚀 Docker构建优化 - 排除不必要文件
+
+# 文档和说明文件
+*.md
+docs/
+README*
+
+# Git相关
+.git/
 .gitignore
+.gitattributes
 
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.coverage
-.pytest_cache
-pip-log.txt
-pip-delete-this-directory.txt
-.tox
-.env
-.venv
-env/
-venv/
-
-# Node.js (frontend)
-frontend/node_modules
-frontend/dist
-frontend/build
-frontend/.eslintcache
-frontend/coverage
-
-# IDE
-.vscode
-.idea
+# IDE和编辑器
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# Logs
-logs
-*.log
+# Python缓存和临时文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+.tox/
+venv/
+env/
+.env.local
+.env.*.local
+
+# Node.js (前端相关)
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.npm
+.yarn-integrity
 
-# Documentation
-*.md
-docs/
+# 构建输出
+build/
+dist/
+*.egg-info/
 
-# Test files
-test_*.py
-*_test.py
-tests/
-examples/
+# 日志文件
+logs/
+*.log
 
-# Uploads and temporary files
-uploads/
+# 临时文件和缓存
+.cache/
+.tmp/
 temp/
 tmp/
 
-# Database files
-*.db
-*.sqlite3
+# 测试相关
+test_data/
+tests/
+*.test.js
+coverage/
 
-# Jupyter notebooks
-*.ipynb
-
-# Data files (exclude large data files)
+# 数据文件 (可能很大)
+uploads/
+data/
 *.csv
-*.json
-*.xml
 *.xlsx
-*.zip
+*.json
+*.sqlite
+*.db
+
+# 模型文件 (太大，应在运行时下载)
+models/
+*.pt
+*.bin
+*.onnx
+
+# 前端构建相关 (不需要在后端容器中)
+frontend/build/
+frontend/node_modules/
+frontend/dist/
+
+# Docker相关
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 示例和样例
+examples/
+sample_data/
+
+# 配置文件 (敏感信息)
+.env
+.env.production
+.env.development
+config.local.*
+
+# 监控和分析
+.nyc_output/
+coverage/
+*.lcov
+
+# 打包文件
 *.tar.gz
+*.zip
+*.rar
 
-# Kubernetes
-k8s/
-
-# Docker
-docker-compose.override.yml
-
-# Scripts
+# 特定于项目的排除项
 scripts/
+k8s/
+pytest.ini
 
-# Alembic (exclude migration files from image)
-backend/alembic/versions/
+# 大型二进制文件
+*.mp4
+*.avi
+*.mov
+*.mp3
+*.wav
+*.flac
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.pdf
 
-# Backend specific excludes
-backend/data/
-backend/logs/ 
+# 仅保留必要的后端代码
+!backend/
+!backend/**/*.py
+!backend/requirements.txt
+!backend/alembic.ini 

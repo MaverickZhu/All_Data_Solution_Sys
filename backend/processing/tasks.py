@@ -55,7 +55,7 @@ from backend.services.mongo_service import mongo_service
 from backend.services.llm_service import LLMService # 引入LLMService
 # Removed AudioDescriptionService import - using direct Whisper integration instead
 
-from backend.services.audio_enhancement import ChineseAudioEnhancer
+from backend.services.audio_enhancement import AudioEnhancementService
 
 logger = logging.getLogger("ml")
 
@@ -710,69 +710,96 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             "file_size_mb": round(file_size / (1024 * 1024), 2)
         }
         
-        # 5. GPU加速语音识别
+        # 5. 语音识别处理（如果是音频文件）- 临时简化版本
         speech_analysis = {}
-        try:
-            from backend.services.whisper_service import whisper_service
-            
-            logger.info("🎯 启动GPU加速语音识别...")
-            start_time = time.time()
-            
-            # 使用优化的WhisperService进行转录
-            result = whisper_service.transcribe_audio(audio_path, language="zh")
-            
-            if result and result.get("text") and not result.get("error"):
-                processed_text = result["text"].strip()
+        if file_extension.lower() in ['.mp3', '.wav', '.m4a', '.flac', '.aac']:
+            try:
+                # 临时方案：跳过音频预处理，直接语音识别
+                logger.info(f"🎯 启动简化音频分析（跳过预处理）...")
                 
+                # 直接使用WhisperService，避免AudioDescriptionService的复杂依赖
+                from backend.services.whisper_service import WhisperService
+                whisper_service = WhisperService.get_instance()
+                
+                # 简单的语音识别，没有预处理
+                result = whisper_service.transcribe_audio(str(audio_path))
+                
+                # 修复：根据实际结果判断成功，而不是依赖success字段
+                if result and result.get('text', '').strip() and not result.get('error'):
+                    speech_text = result.get('text', '')
+                    logger.info(f"✅ 语音识别成功，识别文本长度: {len(speech_text)}")
+                    
+                    # 应用文本优化 - 使用重写的安全版本
+                    text_optimization_result = None
+                    if True:  # 启用改进的文本优化
+                        if speech_text and len(speech_text.strip()) > 0:
+                            try:
+                                logger.info(f"🧠 开始智能文本优化...")
+                                from backend.services.text_optimization_service import TextOptimizationService
+                                
+                                text_optimizer = TextOptimizationService()
+                                optimization_result = text_optimizer.optimize_speech_text(speech_text, 'zh')
+                                
+                                if optimization_result and optimization_result.get('success', False):
+                                    text_optimization_result = optimization_result
+                                    logger.info(f"✅ 文本优化成功！")
+                                    logger.info(f"📝 原始文本长度: {len(speech_text)}")
+                                    logger.info(f"📝 优化文本长度: {len(optimization_result.get('optimized_text', ''))}")
+                                    logger.info(f"📝 应用改进: {optimization_result.get('improvements', [])}")
+                                else:
+                                    logger.warning(f"⚠️ 文本优化失败")
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ 文本优化异常: {str(e)}")
+                    
+                    # 确定最终展示的文本：暂时直接使用原始文本
+                    final_transcribed_text = speech_text
+                    if text_optimization_result and text_optimization_result.get('success', False):
+                        optimized_text = text_optimization_result.get('optimized_text', '')
+                        if optimized_text and optimized_text.strip():
+                            final_transcribed_text = optimized_text
+                            logger.info(f"✅ 文本优化成功：优化后长度 {len(optimized_text)} 字符")
+                            logger.info(f"🔧 应用改进：{text_optimization_result.get('improvements', [])}")
+                    else:
+                        logger.info(f"🔄 使用原始语音识别结果，长度: {len(speech_text)} 字符")
+                    
+                    speech_analysis = {
+                        'success': True,
+                        'transcription': speech_text,  # 原始识别文本
+                        'transcribed_text': final_transcribed_text,  # 前端期望的字段，优化后的文本
+                        'raw_text': speech_text,  # 原始文本，用于前端对比显示
+                        'confidence': result.get('confidence', 0.0),
+                        'language': result.get('language', 'unknown'),
+                        'text_optimization': text_optimization_result,  # 新增字段
+                        'processing_time': result.get('processing_time', 0.0),
+                        'model_used': 'whisper-simple'
+                    }
+                else:
+                    error_msg = result.get('error', 'Speech recognition failed') if result else 'No result returned'
+                    logger.error(f"❌ 语音识别失败: {error_msg}")
+                    speech_analysis = {
+                        'success': False,
+                        'error': error_msg,
+                        'model_used': 'whisper-simple'
+                    }
+                    
+            except Exception as e:
+                logger.error(f"❌ 音频分析异常: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 speech_analysis = {
-                    "success": True,
-                    "transcribed_text": processed_text,
-                    "language_detected": result.get("language", "zh"),
-                    "confidence": result.get("confidence", 0),
-                    "segments_count": result.get("segments_count", 0),
-                    "word_count": len(processed_text.split()) if processed_text else 0,
-                    "gpu_accelerated": result.get("gpu_accelerated", False),
-                    "model_used": result.get("model_used", "unknown"),
-                    "processing_time": result.get("processing_time", 0),
-                    "transcription_time": result.get("transcription_time", 0)
+                    'success': False,
+                    'error': str(e),
+                    'model_used': 'whisper-simple'
                 }
-                
-                logger.info(f"✅ 语音识别成功: {len(processed_text)}字符, GPU加速: {result.get('gpu_accelerated', False)}")
-                
-            else:
-                error_msg = result.get("error", "No speech content detected") if result else "转录失败"
-                speech_analysis = {
-                    "success": False,
-                    "error": error_msg,
-                    "transcribed_text": "",
-                    "language_detected": "unknown",
-                    "confidence": 0,
-                    "gpu_accelerated": result.get("gpu_accelerated", False) if result else False,
-                    "processing_time": result.get("processing_time", 0) if result else 0
-                }
-                logger.warning(f"⚠️ 语音识别失败: {error_msg}")
-                
-        except Exception as e:
-            logger.error(f"❌ 语音识别异常: {e}", exc_info=True)
-            speech_analysis = {
-                "success": False,
-                "error": str(e),
-                "transcribed_text": "",
-                "language_detected": "unknown", 
-                "confidence": 0,
-                "gpu_accelerated": False,
-                "processing_time": 0
-            }
 
-
-        
         # 6. Enhanced analysis summary with rule-based classification
         enhanced_summary = analysis_summary.copy()
         
         # Rule-based audio type classification
         audio_type = "未知"
-        if speech_analysis.get("success") and speech_analysis.get("transcribed_text"):
-            if len(speech_analysis["transcribed_text"]) > 50:
+        if speech_analysis.get("success") and speech_analysis.get("transcription"):
+            if len(speech_analysis["transcription"]) > 50:
                 audio_type = "语音/对话"
             else:
                 audio_type = "可能包含语音"
@@ -802,6 +829,8 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             
         enhanced_summary["audio_quality"] = audio_quality
         
+        # 文本优化已经在前面执行过了，这里不需要重复执行
+
         # Combine all results
         result = {
             "analysis_type": "audio",
@@ -813,7 +842,8 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             "metadata": metadata,
             "audio_properties": {**audio_info, **audio_features},
             "analysis_summary": enhanced_summary,
-            "speech_recognition": speech_analysis  # Whisper语音识别结果
+            "speech_recognition": speech_analysis,  # Whisper语音识别结果
+            "text_optimization": text_optimization_result  # 新增：智能文本优化结果
         }
         
         logger.info(f"Audio analysis completed successfully for {audio_path}")
@@ -1112,6 +1142,8 @@ def run_profiling_task(self, data_source_id: int):
                 mongo_service.save_text_analysis_results(data_source_id, profile_result)
             elif data_source.analysis_category == AnalysisCategory.TABULAR and "error" not in profile_result:
                 mongo_service.save_tabular_analysis_results(data_source_id, profile_result)
+            elif data_source.analysis_category == AnalysisCategory.AUDIO and "error" not in profile_result:
+                mongo_service.save_audio_analysis_results(data_source_id, profile_result)
             
             # For image analysis, save image hash to the main database
             if data_source.analysis_category == AnalysisCategory.IMAGE and "error" not in profile_result:

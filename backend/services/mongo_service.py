@@ -134,4 +134,59 @@ class MongoService:
             logger.error(f"Failed to get tabular analysis results for data_source_id {data_source_id} from MongoDB: {e}", exc_info=True)
             return {}
 
+    @classmethod
+    def save_audio_analysis_results(cls, data_source_id: int, analysis_data: dict):
+        """
+        Saves or updates audio analysis results in the 'audio_analysis_results' collection.
+
+        Args:
+            data_source_id: The ID of the data source from PostgreSQL.
+            analysis_data: A dictionary containing audio features, speech recognition, metadata, etc.
+        """
+        try:
+            db = cls._get_db()
+            collection = db.audio_analysis_results
+
+            # Use update_one with upsert=True to either insert a new document
+            # or update an existing one based on the data_source_id.
+            result = collection.update_one(
+                {"data_source_id": data_source_id},
+                {"$set": analysis_data},
+                upsert=True
+            )
+            
+            if result.upserted_id:
+                logger.info(f"Inserted new audio analysis result for data_source_id: {data_source_id}")
+            elif result.modified_count > 0:
+                logger.info(f"Updated audio analysis result for data_source_id: {data_source_id}")
+            else:
+                logger.info(f"No changes made to audio analysis result for data_source_id: {data_source_id}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save audio analysis results for data_source_id {data_source_id} to MongoDB: {e}", exc_info=True)
+            return False
+
+    @classmethod
+    def get_audio_analysis_results(cls, data_source_id: int) -> dict:
+        """
+        Retrieves audio analysis results for a given data source ID.
+        """
+        try:
+            db = cls._get_db()
+            collection = db.audio_analysis_results
+            result = collection.find_one({"data_source_id": data_source_id})
+            
+            if result:
+                # Remove the internal MongoDB '_id' before returning
+                result.pop('_id', None)
+                logger.debug(f"Found audio analysis result for data_source_id: {data_source_id}")
+                return result
+            else:
+                logger.debug(f"No audio analysis result found for data_source_id: {data_source_id}")
+                return {}
+        except Exception as e:
+            logger.error(f"Failed to get audio analysis results for data_source_id {data_source_id} from MongoDB: {e}", exc_info=True)
+            return {}
+
 mongo_service = MongoService() 
