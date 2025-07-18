@@ -665,11 +665,14 @@ def perform_audio_analysis(audio_path: Path) -> dict:
             if not hasattr(scipy.signal, 'hann'):
                 scipy.signal.hann = scipy.signal.windows.hann
             
-            # Load audio with librosa
-            y, sr = librosa.load(audio_path, sr=None, duration=30)  # Analyze first 30 seconds
+            # Load audio with librosa - first get full duration
+            full_duration = librosa.get_duration(path=audio_path)
+            
+            # Load audio for feature analysis (limit to 30 seconds for performance)
+            y, sr = librosa.load(audio_path, sr=None, duration=min(30, full_duration))
             
             # Basic features
-            duration = librosa.get_duration(y=y, sr=sr)
+            duration = full_duration  # Use full duration, not truncated
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
             
             # Spectral features
@@ -879,12 +882,12 @@ def perform_video_analysis(video_path: Path) -> dict:
         file_size = video_path.stat().st_size
         file_extension = video_path.suffix.lower()
         
-        # 2. Video analysis using OpenCV
+        # 2. Enhanced video analysis using OpenCV and moviepy
         video_info = {}
         metadata = {}
         
         try:
-            # Open video with OpenCV
+            # Primary analysis with OpenCV
             cap = cv2.VideoCapture(str(video_path))
             
             if cap.isOpened():
@@ -905,16 +908,79 @@ def perform_video_analysis(video_path: Path) -> dict:
                     "aspect_ratio": round(width / height, 2) if height > 0 else 0
                 }
                 
-                # Generate thumbnail (first frame)
+                # Enhanced thumbnail generation with better quality
                 ret, frame = cap.read()
-                thumbnail_path = None
                 if ret:
+                    # Create thumbnails directory if it doesn't exist
+                    thumbnails_dir = video_path.parent / "thumbnails"
+                    thumbnails_dir.mkdir(exist_ok=True)
+                    
                     thumbnail_filename = f"thumb_{video_path.stem}.jpg"
-                    thumbnail_path = video_path.parent / thumbnail_filename
-                    cv2.imwrite(str(thumbnail_path), frame)
+                    thumbnail_path = thumbnails_dir / thumbnail_filename
+                    
+                    # Resize thumbnail to reasonable size (max 400px width)
+                    h, w = frame.shape[:2]
+                    if w > 400:
+                        scale = 400 / w
+                        new_w, new_h = int(w * scale), int(h * scale)
+                        frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    
+                    # Save thumbnail with high quality
+                    cv2.imwrite(str(thumbnail_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     video_info["thumbnail_path"] = str(thumbnail_path)
+                    logger.info(f"Generated thumbnail: {thumbnail_path}")
                 
                 cap.release()
+                
+                # Try to get additional metadata with moviepy (fallback)
+                try:
+                    from moviepy.editor import VideoFileClip
+                    with VideoFileClip(str(video_path)) as clip:
+                        if not video_info.get("duration_seconds"):
+                            video_info["duration_seconds"] = clip.duration
+                        if not video_info.get("fps"):
+                            video_info["fps"] = clip.fps
+                        
+                        # Additional moviepy-specific info
+                        video_info["has_audio"] = clip.audio is not None
+                        if clip.audio:
+                            video_info["audio_duration"] = clip.audio.duration
+                        
+                        logger.info(f"Enhanced video info with moviepy: duration={clip.duration:.2f}s, has_audio={clip.audio is not None}")
+                        
+                except Exception as e:
+                    logger.warning(f"MoviePy enhancement failed (using OpenCV data): {e}")
+                    
+            else:
+                logger.warning(f"Could not open video file with OpenCV: {video_path}")
+                
+        except Exception as e:
+            logger.warning(f"Could not extract video properties from {video_path}: {e}")
+            # Try moviepy as fallback
+            try:
+                from moviepy.editor import VideoFileClip
+                with VideoFileClip(str(video_path)) as clip:
+                    video_info = {
+                        "width": clip.w,
+                        "height": clip.h,
+                        "fps": clip.fps,
+                        "duration_seconds": clip.duration,
+                        "resolution": f"{clip.w}x{clip.h}",
+                        "aspect_ratio": round(clip.w / clip.h, 2) if clip.h > 0 else 0,
+                        "has_audio": clip.audio is not None
+                    }
+                    logger.info(f"Fallback to moviepy successful: {video_info}")
+            except Exception as fallback_e:
+                logger.error(f"Both OpenCV and moviepy failed: {fallback_e}")
+                video_info = {
+                    "width": 0,
+                    "height": 0,
+                    "fps": 0,
+                    "duration_seconds": 0,
+                    "resolution": "Unknown",
+                    "aspect_ratio": 0,
+                    "has_audio": False
+                }
             
         except Exception as e:
             logger.warning(f"Could not extract video properties from {video_path}: {e}")
@@ -1124,9 +1190,18 @@ def run_profiling_task(self, data_source_id: int):
                 profile_result = {"error": f"Unsupported audio file type: {data_source.file_type}"}
 
         elif data_source.analysis_category == AnalysisCategory.VIDEO:
-            # Video file handling
-            if data_source.file_type in ['mp4', 'avi', 'mov', 'm4v', 'mkv']:
-                profile_result = perform_video_analysis(file_path)
+            # Video file handling with enhanced analysis
+            if data_source.file_type in ['mp4', 'avi', 'mov', 'm4v', 'mkv', 'wmv', 'flv', 'webm', '3gp']:
+                # 使用增强的视频分析服务
+                from backend.services.video_analysis_service import video_analysis_service
+                enhanced_result = video_analysis_service.comprehensive_analysis(file_path)
+                
+                # 如果增强分析失败，回退到基础分析
+                if "error" in enhanced_result:
+                    logger.warning(f"Enhanced video analysis failed, falling back to basic analysis: {enhanced_result['error']}")
+                    profile_result = perform_video_analysis(file_path)
+                else:
+                    profile_result = enhanced_result
             else:
                 logger.warning(f"Unsupported video file type: {data_source.file_type}")
                 profile_result = {"error": f"Unsupported video file type: {data_source.file_type}"}
@@ -1144,6 +1219,8 @@ def run_profiling_task(self, data_source_id: int):
                 mongo_service.save_tabular_analysis_results(data_source_id, profile_result)
             elif data_source.analysis_category == AnalysisCategory.AUDIO and "error" not in profile_result:
                 mongo_service.save_audio_analysis_results(data_source_id, profile_result)
+            elif data_source.analysis_category == AnalysisCategory.VIDEO and "error" not in profile_result:
+                mongo_service.save_video_analysis_results(data_source_id, profile_result)
             
             # For image analysis, save image hash to the main database
             if data_source.analysis_category == AnalysisCategory.IMAGE and "error" not in profile_result:

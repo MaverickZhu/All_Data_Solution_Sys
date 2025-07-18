@@ -99,7 +99,12 @@ const DataSourceDetail = () => {
         }
     };
     
-    const reportData = dataSource?.profiling_result;
+    // 智能解析profiling_result（支持JSON字符串和对象）
+    const reportData = dataSource?.profiling_result ? 
+        (typeof dataSource.profiling_result === 'string' ? 
+            JSON.parse(dataSource.profiling_result) : 
+            dataSource.profiling_result) : 
+        null;
 
     if (isLoading) {
         return (
@@ -227,8 +232,8 @@ const DataSourceDetail = () => {
                         )}
 
                          {/* Analysis Results */}
-                        {(taskStatus === 'completed' || reportData) && dataSource.profiling_result && (
-                            <ProfilingReport report={dataSource.profiling_result} dataSource={dataSource} />
+                        {(taskStatus === 'completed' || reportData) && reportData && (
+                            <ProfilingReport report={reportData} dataSource={dataSource} />
                         )}
                     </div>
 

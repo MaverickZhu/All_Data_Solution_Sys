@@ -104,6 +104,11 @@ class WhisperService:
             logger.info(f"🎵 开始转录音频: {audio_name}")
             logger.info(f"🔧 使用设备: {self.device}")
             
+            # 获取实际音频时长
+            import librosa
+            actual_duration = librosa.get_duration(path=str(audio_path))
+            logger.info(f"📊 音频时长: {actual_duration:.2f}秒")
+            
             # 获取模型并验证GPU状态
             model_to_use = self.model
             gpu_enabled = self.device == "cuda"
@@ -142,7 +147,7 @@ class WhisperService:
                 return {
                     "text": "",
                     "language": language,
-                    "duration": 0,
+                    "duration": actual_duration,  # 即使没有语音内容，也返回实际时长
                     "confidence": 0.0,
                     "gpu_accelerated": gpu_enabled,
                     "processing_time": time.time() - start_time,
@@ -169,7 +174,7 @@ class WhisperService:
             result_data = {
                 "text": result["text"].strip(),
                 "language": result.get("language", language),
-                "duration": len(segments) * 30 if segments else 0,  # 估算
+                "duration": actual_duration,  # 使用实际音频时长
                 "confidence": round(avg_confidence, 3),
                 "gpu_accelerated": gpu_enabled,
                 "processing_time": round(total_time, 2),
@@ -192,7 +197,7 @@ class WhisperService:
             return {
                 "text": "",
                 "language": language,
-                "duration": 0,
+                "duration": 0,  # 错误情况下无法获取时长
                 "confidence": 0.0,
                 "gpu_accelerated": self.device == "cuda",
                 "processing_time": error_time,

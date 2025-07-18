@@ -329,7 +329,7 @@ const ProfilingReport = ({ report, dataSource }) => {
   const isTabularFile = report.analysis_type === 'tabular';
   const isImageFile = report.analysis_type === 'image';
   const isAudioFile = report.analysis_type === 'audio';
-  const isVideoFile = report.analysis_type === 'video';
+  const isVideoFile = report.analysis_type === 'video' || report.analysis_type === 'video_enhanced';
   
 
 

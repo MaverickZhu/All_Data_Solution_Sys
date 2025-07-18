@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # 文件上传配置
     upload_dir: str = Field("./uploads", validation_alias=AliasChoices("upload_dir", "UPLOAD_DIR"))
     max_upload_size: int = Field(2147483648, validation_alias=AliasChoices("max_upload_size", "MAX_UPLOAD_SIZE"))  # 2GB
-    allowed_extensions: List[str] = Field(default=["pdf", "docx", "txt", "csv", "xlsx", "json", "jpg", "jpeg", "png", "gif", "mp3", "wav", "m4a", "flac", "mp4", "avi", "mov", "mkv"], validation_alias=AliasChoices("allowed_extensions", "ALLOWED_EXTENSIONS"))
+    allowed_extensions: List[str] = Field(default=["pdf", "docx", "txt", "csv", "xlsx", "json", "jpg", "jpeg", "png", "gif", "mp3", "wav", "m4a", "flac", "mp4", "avi", "mov", "mkv", "wmv", "flv", "webm", "m4v", "3gp"], validation_alias=AliasChoices("allowed_extensions", "ALLOWED_EXTENSIONS"))
     
     # Celery配置
     celery_broker_url: str = Field("redis://:multimodal123@multimodal_redis:6379/1", validation_alias=AliasChoices("celery_broker_url", "CELERY_BROKER_URL"))

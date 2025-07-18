@@ -37,11 +37,14 @@ class AudioDescriptionService:
     def extract_audio_features(self, audio_path: Path) -> Dict:
         """提取音频的基础特征"""
         try:
-            # 加载音频文件
-            y, sr = librosa.load(str(audio_path), sr=None, duration=30.0)  # 只分析前30秒
+            # 先获取完整音频时长
+            full_duration = librosa.get_duration(path=str(audio_path))
+            
+            # 加载音频文件（为了性能，特征分析只用前30秒）
+            y, sr = librosa.load(str(audio_path), sr=None, duration=min(30.0, full_duration))
             
             # 提取基础特征
-            duration = len(y) / sr
+            duration = full_duration  # 使用完整时长，而不是截断后的时长
             
             # 音频强度特征
             rms = librosa.feature.rms(y=y)[0]

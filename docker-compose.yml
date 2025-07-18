@@ -4,7 +4,7 @@ services:
     image: timescale/timescaledb:latest-pg14
     container_name: multimodal_postgres
     ports:
-      - "9433:5432"
+      - "19433:5432"
     environment:
       POSTGRES_DB: multimodal_analysis
       POSTGRES_USER: postgres
@@ -139,7 +139,7 @@ services:
     image: rabbitmq:3-management
     container_name: multimodal_rabbitmq
     ports:
-      - "9672:5672"
+      - "25672:5672"
       - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: admin
