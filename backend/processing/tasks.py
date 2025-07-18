@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import numpy as np
 import asyncio # 引入asyncio
+from datetime import datetime, timezone
 
 from ydata_profiling import ProfileReport
 from sqlalchemy.exc import OperationalError
@@ -1107,10 +1108,10 @@ def generate_fallback_profile(df: pd.DataFrame) -> dict:
 
 @celery_app.task(
     bind=True,
-    autoretry_for=(OperationalError,),
+    autoretry_for=(),  # 不自动重试任何错误，手动控制重试逻辑
     retry_backoff=True,
     retry_jitter=True,
-    retry_kwargs={'max_retries': 3}
+    retry_kwargs={'max_retries': 2}  # 减少重试次数
 )
 def run_profiling_task(self, data_source_id: int):
     """
@@ -1190,18 +1191,10 @@ def run_profiling_task(self, data_source_id: int):
                 profile_result = {"error": f"Unsupported audio file type: {data_source.file_type}"}
 
         elif data_source.analysis_category == AnalysisCategory.VIDEO:
-            # Video file handling with enhanced analysis
+            # Video file handling with basic analysis for profiling
             if data_source.file_type in ['mp4', 'avi', 'mov', 'm4v', 'mkv', 'wmv', 'flv', 'webm', '3gp']:
-                # 使用增强的视频分析服务
-                from backend.services.video_analysis_service import video_analysis_service
-                enhanced_result = video_analysis_service.comprehensive_analysis(file_path)
-                
-                # 如果增强分析失败，回退到基础分析
-                if "error" in enhanced_result:
-                    logger.warning(f"Enhanced video analysis failed, falling back to basic analysis: {enhanced_result['error']}")
-                    profile_result = perform_video_analysis(file_path)
-                else:
-                    profile_result = enhanced_result
+                # 使用基础视频分析进行profiling
+                profile_result = perform_video_analysis(file_path)
             else:
                 logger.warning(f"Unsupported video file type: {data_source.file_type}")
                 profile_result = {"error": f"Unsupported video file type: {data_source.file_type}"}
@@ -1247,3 +1240,241 @@ def run_profiling_task(self, data_source_id: int):
     finally:
         if db:
             db.close() 
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(),  # 不自动重试任何错误，手动控制重试逻辑
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={'max_retries': 2}  # 减少重试次数
+)
+def run_video_deep_analysis_task(self, video_analysis_id: int):
+    """
+    视频深度分析Celery任务
+    执行完整的多模态视频语义分析
+    """
+    logger.info(f"Starting video deep analysis task for video_analysis_id: {video_analysis_id}")
+    db = next(get_sync_db())
+    
+    try:
+        # 导入视频分析相关模块
+        from backend.models.video_analysis import VideoAnalysis, VideoAnalysisStatus
+        from backend.services.video_analysis_service import VideoAnalysisService
+        
+        # 获取视频分析记录
+        video_analysis = db.query(VideoAnalysis).filter(VideoAnalysis.id == video_analysis_id).first()
+        if not video_analysis:
+            logger.error(f"VideoAnalysis with id {video_analysis_id} not found.")
+            return {"status": "failed", "error": "VideoAnalysis not found"}
+        
+        # 获取关联的数据源
+        data_source = db.query(DataSource).filter(DataSource.id == video_analysis.data_source_id).first()
+        if not data_source:
+            logger.error(f"DataSource with id {video_analysis.data_source_id} not found.")
+            return {"status": "failed", "error": "DataSource not found"}
+        
+        # 更新状态为进行中
+        video_analysis.status = VideoAnalysisStatus.IN_PROGRESS
+        db.commit()
+        
+        # 创建视频分析服务实例
+        analysis_service = VideoAnalysisService()
+        
+        # 执行深度分析
+        logger.info(f"Starting enhanced video analysis for: {data_source.name}")
+        
+        # 使用asyncio运行异步分析
+        import asyncio
+        
+        # 创建新的事件循环（在Celery worker中需要）
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # 执行增强分析，添加进度更新回调
+        def update_progress(phase: str, progress: float, message: str = ""):
+            """更新分析进度"""
+            try:
+                # 更新数据库中的进度信息
+                video_analysis.current_phase = phase
+                video_analysis.progress_percentage = progress
+                video_analysis.progress_message = message
+                video_analysis.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info(f"进度更新: {phase} - {progress:.1f}% - {message}")
+            except Exception as e:
+                logger.error(f"进度更新失败: {e}")
+        
+        # 执行增强分析
+        analysis_result = loop.run_until_complete(
+            analysis_service.perform_enhanced_analysis(data_source, video_analysis, update_progress)
+        )
+        
+        # 检查分析结果
+        if "error" in analysis_result:
+            # 分析失败
+            video_analysis.status = VideoAnalysisStatus.FAILED
+            video_analysis.error_message = analysis_result.get("error", "Unknown error")
+            db.commit()
+            
+            logger.error(f"Video deep analysis failed for {video_analysis_id}: {analysis_result['error']}")
+            return {
+                "status": "failed", 
+                "error": analysis_result["error"],
+                "video_analysis_id": video_analysis_id
+            }
+        
+        # 分析成功，更新数据库
+        video_analysis.status = VideoAnalysisStatus.COMPLETED
+        
+        # 保存分析结果到各个字段
+        visual_analysis = analysis_result.get("visual_analysis", {})
+        audio_analysis = analysis_result.get("audio_analysis", {})
+        multimodal_fusion = analysis_result.get("multimodal_fusion", {})
+        
+        # 更新视频分析字段
+        if visual_analysis.get("scene_detection"):
+            video_analysis.scene_count = len(visual_analysis["scene_detection"].get("scene_changes", []))
+        
+        if visual_analysis.get("frame_extraction"):
+            key_frames_info = visual_analysis["frame_extraction"].get("key_frames_info", [])
+            # 确保key_frames是字典格式
+            if isinstance(key_frames_info, list):
+                video_analysis.key_frames = {"frames": key_frames_info, "count": len(key_frames_info)}
+            else:
+                video_analysis.key_frames = key_frames_info
+        
+        if visual_analysis.get("visual_themes"):
+            video_analysis.visual_themes = list(visual_analysis["visual_themes"])
+        
+        if visual_analysis.get("detected_objects"):
+            # 转换为字典列表格式
+            detected_objects = visual_analysis["detected_objects"]
+            if isinstance(detected_objects, list) and detected_objects:
+                if isinstance(detected_objects[0], str):
+                    # 如果是字符串列表，转换为字典列表
+                    video_analysis.visual_objects = [
+                        {"name": obj, "confidence": 1.0, "category": "detected"} 
+                        for obj in detected_objects
+                    ]
+                else:
+                    # 如果已经是字典列表，直接使用
+                    video_analysis.visual_objects = detected_objects
+            else:
+                video_analysis.visual_objects = []
+        
+        if visual_analysis.get("scene_changes"):
+            scene_changes = visual_analysis["scene_changes"]
+            # 确保scene_changes是字典列表格式
+            if isinstance(scene_changes, list):
+                video_analysis.scene_changes = [
+                    {"timestamp": change, "type": "scene_change"} if isinstance(change, (int, float))
+                    else change for change in scene_changes
+                ]
+            else:
+                video_analysis.scene_changes = scene_changes
+        
+        if audio_analysis.get("enhanced_speech", {}).get("segments"):
+            video_analysis.speech_segments = audio_analysis["enhanced_speech"]["segments"]
+        
+        if audio_analysis.get("semantic_analysis", {}).get("topics"):
+            video_analysis.audio_themes = audio_analysis["semantic_analysis"]["topics"]
+        
+        if audio_analysis.get("semantic_analysis", {}).get("emotion_timeline"):
+            video_analysis.emotion_timeline = audio_analysis["semantic_analysis"]["emotion_timeline"]
+        
+        if audio_analysis.get("enhanced_speech", {}).get("full_text"):
+            video_analysis.transcription = audio_analysis["enhanced_speech"]["full_text"]
+        
+        if multimodal_fusion.get("story_analysis", {}).get("story_segments"):
+            video_analysis.story_segments = multimodal_fusion["story_analysis"]["story_segments"]
+        
+        if multimodal_fusion.get("story_analysis", {}).get("key_moments"):
+            video_analysis.key_moments = multimodal_fusion["story_analysis"]["key_moments"]
+        
+        if multimodal_fusion.get("comprehensive_understanding", {}).get("summary"):
+            video_analysis.comprehensive_summary = multimodal_fusion["comprehensive_understanding"]["summary"]
+        
+        # 合并所有标签
+        content_tags = set()
+        if visual_analysis.get("visual_themes"):
+            content_tags.update(visual_analysis["visual_themes"])
+        if audio_analysis.get("semantic_analysis", {}).get("topics"):
+            content_tags.update(audio_analysis["semantic_analysis"]["topics"])
+        if multimodal_fusion.get("semantic_correlation", {}).get("cross_modal_tags"):
+            content_tags.update(multimodal_fusion["semantic_correlation"]["cross_modal_tags"])
+        
+        video_analysis.content_tags = list(content_tags)
+        
+        # 记录处理时间和模型版本
+        video_analysis.processing_time = analysis_result.get("analysis_metadata", {}).get("total_processing_time", 0)
+        video_analysis.model_versions = {
+            "qwen_vl": "2.5-VL-7B",
+            "whisper": "large-v3",
+            "analysis_version": "1.0"
+        }
+        
+        # 保存完整结果到MongoDB
+        mongo_service.save_video_deep_analysis_results(video_analysis_id, analysis_result)
+        
+        # 提交数据库更改
+        db.commit()
+        
+        logger.info(f"Video deep analysis completed successfully for video_analysis_id: {video_analysis_id}")
+        return {
+            "status": "completed", 
+            "video_analysis_id": video_analysis_id,
+            "analysis_result": {
+                "scene_count": video_analysis.scene_count,
+                "key_frames_count": len(video_analysis.key_frames) if video_analysis.key_frames else 0,
+                "visual_themes_count": len(video_analysis.visual_themes) if video_analysis.visual_themes else 0,
+                "speech_segments_count": len(video_analysis.speech_segments) if video_analysis.speech_segments else 0,
+                "story_segments_count": len(video_analysis.story_segments) if video_analysis.story_segments else 0,
+                "analysis_phases": analysis_result.get("analysis_metadata", {}).get("phases_completed", [])
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Video deep analysis task failed for {video_analysis_id}: {e}", exc_info=True)
+        
+        # 判断是否应该重试
+        error_message = str(e)
+        should_retry = False
+        
+        # 只对网络相关或临时性错误进行重试
+        if any(keyword in error_message.lower() for keyword in [
+            'connection', 'timeout', 'network', 'temporary', 'retry'
+        ]):
+            should_retry = True
+        
+        # 对于数据序列化错误、模型错误等，不进行重试
+        if any(keyword in error_message.lower() for keyword in [
+            'documents must have only string keys', 'serialization', 'bson.errors',
+            'invalid document', 'model not found', 'cuda out of memory'
+        ]):
+            should_retry = False
+        
+        # 更新失败状态
+        try:
+            video_analysis = db.query(VideoAnalysis).filter(VideoAnalysis.id == video_analysis_id).first()
+            if video_analysis:
+                video_analysis.status = VideoAnalysisStatus.FAILED
+                video_analysis.error_message = str(e)
+                db.commit()
+        except Exception as db_error:
+            logger.error(f"Failed to update video analysis status: {db_error}")
+        
+        # 如果应该重试且还有重试次数
+        if should_retry and self.request.retries < self.max_retries:
+            logger.info(f"Retrying video analysis task for {video_analysis_id}, attempt {self.request.retries + 1}")
+            raise self.retry(countdown=60 * (self.request.retries + 1), exc=e)
+        
+        return {
+            "status": "failed",
+            "error": str(e),
+            "video_analysis_id": video_analysis_id
+        }
+    finally:
+        db.close() 

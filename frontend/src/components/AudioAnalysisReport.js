@@ -10,20 +10,6 @@ const StatCard = ({ label, value, icon, className = '' }) => (
     </div>
 );
 
-const MetadataCard = ({ title, data }) => (
-    <div className="bg-slate-800/50 p-4 rounded-lg">
-        <h5 className="text-sm font-medium text-sky-400 mb-3">{title}</h5>
-        <div className="space-y-2 max-h-32 overflow-y-auto">
-            {Object.entries(data || {}).map(([key, value]) => (
-                <div key={key} className="flex justify-between text-sm">
-                    <span className="text-slate-400 truncate mr-2">{key}:</span>
-                    <span className="text-white text-right">{value || 'N/A'}</span>
-                </div>
-            ))}
-        </div>
-    </div>
-);
-
 const AudioAnalysisReport = ({ result }) => {
 
 

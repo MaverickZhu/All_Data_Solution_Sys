@@ -54,8 +54,8 @@ class WhisperService:
             start_time = time.time()
             
             try:
-                # 优先使用Turbo模型提升速度（可通过环境变量配置）
-                model_name = os.getenv("WHISPER_MODEL", "turbo")  # 默认使用turbo
+                # 优先使用Large V3模型，提供最佳质量（可通过环境变量配置）
+                model_name = os.getenv("WHISPER_MODEL", "large-v3")  # 默认使用large-v3
                 
                 if self.device == "cuda":
                     # GPU模式：加载模型到GPU，让Whisper自己处理精度
@@ -76,12 +76,24 @@ class WhisperService:
                 logger.info(f"🎉 Whisper模型({model_name})加载成功，耗时 {load_time:.2f}秒，设备: {self.device}")
                 
             except Exception as e:
-                logger.error(f"❌ 模型加载失败: {e}")
-                # 降级到base模型
-                logger.info("🔄 降级到base模型...")
-                self._model = whisper.load_model("base", device=self.device)
-                load_time = time.time() - start_time
-                logger.info(f"✅ Base模型加载成功，耗时 {load_time:.2f}秒")
+                logger.error(f"❌ 主模型({model_name})加载失败: {e}")
+                # 降级策略：large-v3 -> turbo -> base
+                fallback_models = ["turbo", "base"] if model_name == "large-v3" else ["base"]
+                
+                for fallback_model in fallback_models:
+                    try:
+                        logger.info(f"🔄 降级到{fallback_model}模型...")
+                        self._model = whisper.load_model(fallback_model, device=self.device)
+                        load_time = time.time() - start_time
+                        logger.info(f"✅ {fallback_model}模型加载成功，耗时 {load_time:.2f}秒")
+                        break
+                    except Exception as fallback_e:
+                        logger.error(f"❌ {fallback_model}模型也加载失败: {fallback_e}")
+                        continue
+                
+                if self._model is None:
+                    logger.error("💥 所有Whisper模型都加载失败，请检查安装")
+                    raise RuntimeError("无法加载任何Whisper模型")
         
         return self._model
     

@@ -5,7 +5,7 @@ API v1 主路由器
 from fastapi import APIRouter
 
 # 导入各个模块的路由
-from backend.api.v1.endpoints import users, projects, data_sources, processing, search
+from backend.api.v1.endpoints import users, projects, data_sources, processing, search, video_analysis
 from backend.api.v1.endpoints import auth
 
 # 创建v1 API路由器
@@ -22,6 +22,7 @@ api_router.include_router(
 )
 api_router.include_router(processing.router, prefix="/processing", tags=["Data Processing"])
 api_router.include_router(search.router, tags=["Search"])
+api_router.include_router(video_analysis.router, prefix="/video-analysis", tags=["Video Analysis"])
 # api_router.include_router(analysis.router, prefix="/analysis", tags=["分析"])
 # api_router.include_router(search.router, prefix="/search", tags=["搜索"])
 

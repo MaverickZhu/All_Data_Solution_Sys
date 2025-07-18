@@ -23,6 +23,32 @@ class MongoService:
                 logger.error(f"Failed to connect to MongoDB: {e}", exc_info=True)
                 raise
         return cls._db
+    
+    @staticmethod
+    def _sanitize_for_mongodb(obj):
+        """
+        递归清理数据以确保MongoDB兼容性：
+        1. 转换numpy类型为Python原生类型
+        2. 确保字典键为字符串
+        3. 处理其他MongoDB不支持的类型
+        """
+        import numpy as np
+        
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            # 确保所有字典键都是字符串，这对MongoDB很重要
+            return {str(key): MongoService._sanitize_for_mongodb(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [MongoService._sanitize_for_mongodb(item) for item in obj]
+        else:
+            return obj
 
     @classmethod
     def save_text_analysis_results(cls, data_source_id: int, analysis_data: dict):
@@ -37,11 +63,14 @@ class MongoService:
             db = cls._get_db()
             collection = db.text_analysis_results # Using a dedicated collection for clarity
 
+            # 清理数据以确保MongoDB兼容性
+            sanitized_data = cls._sanitize_for_mongodb(analysis_data)
+
             # Use update_one with upsert=True to either insert a new document
             # or update an existing one based on the data_source_id.
             result = collection.update_one(
                 {"data_source_id": data_source_id},
-                {"$set": analysis_data},
+                {"$set": sanitized_data},
                 upsert=True
             )
             
@@ -92,11 +121,14 @@ class MongoService:
             db = cls._get_db()
             collection = db.tabular_analysis_results
 
+            # 清理数据以确保MongoDB兼容性
+            sanitized_data = cls._sanitize_for_mongodb(analysis_data)
+
             # Use update_one with upsert=True to either insert a new document
             # or update an existing one based on the data_source_id.
             result = collection.update_one(
                 {"data_source_id": data_source_id},
-                {"$set": analysis_data},
+                {"$set": sanitized_data},
                 upsert=True
             )
             
@@ -147,11 +179,14 @@ class MongoService:
             db = cls._get_db()
             collection = db.audio_analysis_results
 
+            # 清理数据以确保MongoDB兼容性
+            sanitized_data = cls._sanitize_for_mongodb(analysis_data)
+
             # Use update_one with upsert=True to either insert a new document
             # or update an existing one based on the data_source_id.
             result = collection.update_one(
                 {"data_source_id": data_source_id},
-                {"$set": analysis_data},
+                {"$set": sanitized_data},
                 upsert=True
             )
             
@@ -202,11 +237,14 @@ class MongoService:
             db = cls._get_db()
             collection = db.video_analysis_results
 
+            # 清理数据以确保MongoDB兼容性
+            sanitized_data = cls._sanitize_for_mongodb(analysis_data)
+
             # Use update_one with upsert=True to either insert a new document
             # or update an existing one based on the data_source_id.
             result = collection.update_one(
                 {"data_source_id": data_source_id},
-                {"$set": analysis_data},
+                {"$set": sanitized_data},
                 upsert=True
             )
             
@@ -242,6 +280,78 @@ class MongoService:
                 return {}
         except Exception as e:
             logger.error(f"Failed to get video analysis results for data_source_id {data_source_id} from MongoDB: {e}", exc_info=True)
+            return {}
+
+    @classmethod
+    def save_video_deep_analysis_results(cls, video_analysis_id: int, analysis_data: dict):
+        """
+        Saves video deep analysis results in the 'video_deep_analysis_results' collection.
+
+        Args:
+            video_analysis_id: The ID of the video analysis record from PostgreSQL.
+            analysis_data: A dictionary containing comprehensive multimodal analysis results.
+        """
+        try:
+            db = cls._get_db()
+            collection = db.video_deep_analysis_results
+
+            # 清理数据以确保MongoDB兼容性
+            analysis_data = cls._sanitize_for_mongodb(analysis_data)
+
+            # Prepare analysis data with metadata
+            analysis_document = {
+                "video_analysis_id": video_analysis_id,
+                "analysis_type": "deep_multimodal",
+                "analysis_timestamp": analysis_data.get("analysis_metadata", {}).get("processing_timestamp"),
+                "visual_analysis": analysis_data.get("visual_analysis", {}),
+                "scene_detection": analysis_data.get("scene_detection", {}),
+                "frame_extraction": analysis_data.get("frame_extraction", {}),
+                "audio_analysis": analysis_data.get("audio_analysis", {}),
+                "multimodal_fusion": analysis_data.get("multimodal_fusion", {}),
+                "analysis_metadata": analysis_data.get("analysis_metadata", {}),
+                "errors": analysis_data.get("errors", [])
+            }
+
+            # Use update_one with upsert=True to either insert a new document
+            # or update an existing one based on the video_analysis_id.
+            result = collection.update_one(
+                {"video_analysis_id": video_analysis_id},
+                {"$set": analysis_document},
+                upsert=True
+            )
+            
+            if result.upserted_id:
+                logger.info(f"Inserted new video deep analysis result for video_analysis_id: {video_analysis_id}")
+            elif result.modified_count > 0:
+                logger.info(f"Updated video deep analysis result for video_analysis_id: {video_analysis_id}")
+            else:
+                logger.info(f"No changes made to video deep analysis result for video_analysis_id: {video_analysis_id}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save video deep analysis results for video_analysis_id {video_analysis_id} to MongoDB: {e}", exc_info=True)
+            return False
+
+    @classmethod
+    def get_video_deep_analysis_results(cls, video_analysis_id: int) -> dict:
+        """
+        Retrieves video deep analysis results for a given video analysis ID.
+        """
+        try:
+            db = cls._get_db()
+            collection = db.video_deep_analysis_results
+            result = collection.find_one({"video_analysis_id": video_analysis_id})
+            
+            if result:
+                # Remove the internal MongoDB '_id' before returning
+                result.pop('_id', None)
+                logger.debug(f"Found video deep analysis result for video_analysis_id: {video_analysis_id}")
+                return result
+            else:
+                logger.debug(f"No video deep analysis result found for video_analysis_id: {video_analysis_id}")
+                return {}
+        except Exception as e:
+            logger.error(f"Failed to get video deep analysis results for video_analysis_id {video_analysis_id} from MongoDB: {e}", exc_info=True)
             return {}
 
 mongo_service = MongoService() 

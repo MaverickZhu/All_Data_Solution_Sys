@@ -133,4 +133,78 @@ export const deleteDataSource = (projectId, dataSourceId) => {
 // Search
 export const searchInProject = (projectId, query) => {
     return apiClient.post(`/projects/${projectId}/search`, { query });
+};
+
+// Video Analysis
+export const startVideoDeepAnalysis = (dataSourceId) => {
+    return apiClient.post(`/video-analysis/${dataSourceId}/analyze?analysis_type=semantic`);
+};
+
+export const getVideoAnalysisStatus = (analysisId) => {
+    return apiClient.get(`/video-analysis/${analysisId}/status`);
+};
+
+// 添加视频深度分析任务轮询方法
+export const pollVideoAnalysisStatus = async (analysisId, onProgress, maxAttempts = 120) => { // 增加到120次 = 10分钟
+    let attempts = 0;
+    
+    const poll = async () => {
+        try {
+            attempts++;
+            const response = await getVideoAnalysisStatus(analysisId);
+            const { 
+                status, 
+                processing_time, 
+                error_message, 
+                current_phase, 
+                progress_percentage, 
+                progress_message 
+            } = response.data;
+            
+            // 调用进度回调 - 使用后端返回的真实进度数据
+            if (onProgress) {
+                onProgress({
+                    status,
+                    attempts,
+                    maxAttempts,
+                    processing_time,
+                    error_message,
+                    current_phase,
+                    progress_percentage: progress_percentage || 0, // 使用后端返回的真实进度
+                    progress_message,
+                    progress: progress_percentage || (attempts <= 3 ? 5 : 0) // 优先使用后端进度，回退到简单估算
+                });
+            }
+            
+            // 检查完成状态
+            if (status === 'COMPLETED') {
+                return { status: 'completed', data: response.data };
+            } else if (status === 'FAILED') {
+                return { status: 'failed', error: error_message || '分析失败' };
+            } else if (attempts >= maxAttempts) {
+                return { status: 'timeout', error: '分析超时' };
+            } else {
+                // 继续轮询
+                await new Promise(resolve => setTimeout(resolve, 5000)); // 5秒间隔
+                return poll();
+            }
+        } catch (error) {
+            // 轮询错误处理 - 在开发环境下显示详细错误
+            if (process.env.NODE_ENV === 'development') {
+                console.error('轮询视频分析状态失败:', error);
+            }
+            if (attempts >= maxAttempts) {
+                return { status: 'error', error: '网络错误' };
+            }
+            // 网络错误时继续重试
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            return poll();
+        }
+    };
+    
+    return poll();
+};
+
+export const getVideoAnalysisReport = (analysisId) => {
+    return apiClient.get(`/video-analysis/${analysisId}/report`);
 }; 

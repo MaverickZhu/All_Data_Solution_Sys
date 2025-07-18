@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as api from '../services/api';
 import ProfilingReport from '../components/ProfilingReport';
+import VideoDeepAnalysisProgress from '../components/VideoDeepAnalysisProgress';
 import { useTaskPolling } from '../utils/useTaskPolling';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
@@ -15,6 +16,10 @@ const DataSourceDetail = () => {
     const [dataSource, setDataSource] = useState(null);
     const [startError, setStartError] = useState('');
     const [isLoading, setIsLoading] = useState(true);
+    
+    // 视频深度分析相关状态
+    const [videoAnalysisId, setVideoAnalysisId] = useState(null);
+    const [showVideoProgress, setShowVideoProgress] = useState(false);
 
     const { 
         taskStatus, 
@@ -70,6 +75,49 @@ const DataSourceDetail = () => {
             console.error('Failed to start data profiling:', error);
             setStartError(error.response?.data?.detail || '启动数据分析失败，请检查控制台获取详情。');
         }
+    };
+
+    const handleVideoDeepAnalysis = async () => {
+        setStartError('');
+        resetTask();
+        try {
+            const response = await api.startVideoDeepAnalysis(dataSourceId);
+            // console.log('视频深度分析响应:', response.data);
+            const analysisId = response.data.id || response.data.analysis_id;
+            if (analysisId) {
+                // 设置分析ID并显示进度组件
+                setVideoAnalysisId(analysisId);
+                setShowVideoProgress(true);
+                // console.log('视频深度分析已启动，分析ID:', analysisId);
+            } else {
+                // console.log('响应中没有找到分析ID:', response.data);
+                setStartError('未能启动视频深度分析。');
+            }
+        } catch (error) {
+            console.error('Failed to start video deep analysis:', error);
+            setStartError(error.response?.data?.detail || '启动视频深度分析失败，请检查控制台获取详情。');
+        }
+    };
+
+    const handleVideoAnalysisComplete = (result) => {
+        // console.log('视频深度分析完成:', result);
+        setShowVideoProgress(false);
+        setVideoAnalysisId(null);
+        
+        // 刷新数据源信息
+        setTimeout(() => {
+            fetchDataSource();
+        }, 1000);
+        
+        // 显示成功提示
+        alert('🎉 视频深度分析完成！\n\n分析结果已保存，页面将自动刷新显示详细报告。');
+    };
+
+    const handleVideoAnalysisError = (error) => {
+        console.error('视频深度分析失败:', error);
+        setShowVideoProgress(false);
+        setVideoAnalysisId(null);
+        setStartError(`视频深度分析失败: ${error}`);
     };
     
     const formatFileSize = (bytes) => {
@@ -196,14 +244,27 @@ const DataSourceDetail = () => {
                                     <span className="h-2 w-2 rounded-full bg-green-400"></span>
                                     <span className="text-green-300 font-medium">分析已完成</span>
                                 </div>
-                                <Button 
-                                    onClick={handleStartProfiling} 
-                                    disabled={taskStatus === 'in_progress' || taskStatus === 'pending'}
-                                    variant="secondary"
-                                    size="sm"
-                                >
-                                    🔄 重新分析
-                                </Button>
+                                <div className="flex gap-2">
+                                    {/* 视频深度分析按钮 */}
+                                    {dataSource.analysis_category === 'VIDEO' && (
+                                        <Button 
+                                            onClick={handleVideoDeepAnalysis} 
+                                            disabled={taskStatus === 'in_progress' || taskStatus === 'pending' || showVideoProgress}
+                                            variant="primary"
+                                            size="sm"
+                                        >
+                                            🧠 深度分析
+                                        </Button>
+                                    )}
+                                    <Button 
+                                        onClick={handleStartProfiling} 
+                                        disabled={taskStatus === 'in_progress' || taskStatus === 'pending'}
+                                        variant="secondary"
+                                        size="sm"
+                                    >
+                                        🔄 重新分析
+                                    </Button>
+                                </div>
                             </div>
                         )}
                         
@@ -231,8 +292,17 @@ const DataSourceDetail = () => {
                             </div>
                         )}
 
+                        {/* Video Deep Analysis Progress */}
+                        {showVideoProgress && videoAnalysisId && (
+                            <VideoDeepAnalysisProgress
+                                analysisId={videoAnalysisId}
+                                onComplete={handleVideoAnalysisComplete}
+                                onError={handleVideoAnalysisError}
+                            />
+                        )}
+
                          {/* Analysis Results */}
-                        {(taskStatus === 'completed' || reportData) && reportData && (
+                        {(taskStatus === 'completed' || reportData) && reportData && !showVideoProgress && (
                             <ProfilingReport report={reportData} dataSource={dataSource} />
                         )}
                     </div>

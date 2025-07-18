@@ -1,414 +1,670 @@
 """
 视频分析服务
-提供专业的视频内容分析、缩略图生成、元数据提取等功能
+基于现有稳定架构设计，遵循DataSourceService的设计模式
 """
+import os
 import logging
-import subprocess
-import json
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-import cv2
-import numpy as np
+from typing import List, Optional, Dict, Any
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from datetime import datetime, timezone
+import uuid
 
-logger = logging.getLogger(__name__)
+from backend.models.video_analysis import (
+    VideoAnalysis, VideoAnalysisCreate, VideoAnalysisUpdate, 
+    VideoAnalysisType, VideoAnalysisStatus,
+    VideoFrame, VideoSegment
+)
+from backend.models.data_source import DataSource, AnalysisCategory
+from backend.models.user import User
+from backend.core.exceptions import NotFoundException, AuthorizationException
+from backend.core.config import settings
+from backend.services.video_frame_extractor import VideoFrameExtractor
+from backend.services.video_vision_service import VideoVisionService
+from backend.services.video_audio_service import VideoAudioService
+from backend.services.video_multimodal_service import VideoMultimodalService
+
+logger = logging.getLogger("service")
+
 
 class VideoAnalysisService:
-    """
-    视频分析服务
-    集成多种视频分析技术，提供全面的视频内容分析
-    """
+    """视频分析服务类 - 遵循现有服务的设计模式"""
     
     def __init__(self):
-        self.supported_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
-        logger.info("🎬 视频分析服务初始化完成")
-    
-    def is_supported_format(self, file_path: Path) -> bool:
-        """检查文件格式是否支持"""
-        return file_path.suffix.lower() in self.supported_formats
-    
-    def extract_metadata_with_ffprobe(self, video_path: Path) -> Dict[str, Any]:
+        self.frame_extractor = VideoFrameExtractor()
+        self.vision_service = VideoVisionService()
+        self.audio_service = VideoAudioService()
+        self.multimodal_service = VideoMultimodalService()
+        logger.info("视频分析服务初始化完成")
+
+    @classmethod
+    async def create_video_analysis(
+        cls,
+        db: AsyncSession,
+        data_source_id: int,
+        analysis_type: VideoAnalysisType,
+        current_user: User
+    ) -> VideoAnalysis:
         """
-        使用ffprobe提取详细的视频元数据
+        创建视频分析任务
+        严格遵循现有服务的权限检查和创建模式
+        """
+        logger.info(f"Creating video analysis for data_source_id: {data_source_id}, type: {analysis_type}")
+        
+        # 验证数据源存在且用户有权限访问
+        data_source = await cls._validate_data_source_access(
+            db, data_source_id, current_user
+        )
+        
+        # 验证数据源是视频类型
+        if data_source.analysis_category != AnalysisCategory.VIDEO:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Data source is not a video file. Category: {data_source.analysis_category}"
+            )
+        
+        # 检查是否已有进行中的分析
+        existing_analysis = await cls._get_active_analysis(db, data_source_id)
+        if existing_analysis:
+            logger.warning(
+                f"Active analysis already exists for data_source_id: {data_source_id}. "
+                f"Existing analysis ID: {existing_analysis.id}, Status: {existing_analysis.status}, "
+                f"Task ID: {existing_analysis.task_id}"
+            )
+            
+            # 检查Celery任务状态
+            if existing_analysis.task_id:
+                from backend.core.celery_app import celery_app
+                try:
+                    task_result = celery_app.AsyncResult(existing_analysis.task_id)
+                    celery_status = task_result.status
+                    logger.info(f"Celery task {existing_analysis.task_id} status: {celery_status}")
+                    
+                    # 如果Celery任务还在运行，返回现有分析
+                    if celery_status in ['PENDING', 'STARTED', 'RETRY']:
+                        return existing_analysis
+                    # 如果Celery任务已完成或失败，但数据库状态不一致，更新数据库状态
+                    elif celery_status == 'SUCCESS' and existing_analysis.status != VideoAnalysisStatus.COMPLETED:
+                        existing_analysis.status = VideoAnalysisStatus.COMPLETED
+                        await db.commit()
+                        return existing_analysis
+                    elif celery_status == 'FAILURE' and existing_analysis.status != VideoAnalysisStatus.FAILED:
+                        existing_analysis.status = VideoAnalysisStatus.FAILED
+                        await db.commit()
+                        # 失败的任务允许重新创建
+                    else:
+                        return existing_analysis
+                except Exception as e:
+                    logger.warning(f"Failed to check Celery task status: {e}")
+                    return existing_analysis
+            else:
+                return existing_analysis
+        
+        # 检查是否已有完成的分析（防止重复创建）
+        completed_result = await db.execute(
+            select(VideoAnalysis).where(
+                VideoAnalysis.data_source_id == data_source_id,
+                VideoAnalysis.status == VideoAnalysisStatus.COMPLETED,
+                VideoAnalysis.is_deleted == False
+            ).order_by(VideoAnalysis.created_at.desc())
+        )
+        completed_analysis = completed_result.scalar_one_or_none()
+        
+        if completed_analysis:
+            logger.warning(
+                f"Completed analysis already exists for data_source_id: {data_source_id}. "
+                f"Analysis ID: {completed_analysis.id}, Completed at: {completed_analysis.updated_at}"
+            )
+            return completed_analysis
+        
+        # 检查最近是否有分析记录（防止频繁创建）
+        from datetime import datetime, timedelta
+        recent_threshold = datetime.now() - timedelta(minutes=5)  # 5分钟内不允许重复创建
+        
+        recent_result = await db.execute(
+            select(VideoAnalysis).where(
+                VideoAnalysis.data_source_id == data_source_id,
+                VideoAnalysis.created_at > recent_threshold,
+                VideoAnalysis.is_deleted == False
+            ).order_by(VideoAnalysis.created_at.desc())
+        )
+        recent_analysis = recent_result.scalar_one_or_none()
+        
+        if recent_analysis:
+            logger.warning(
+                f"Recent analysis found for data_source_id: {data_source_id}. "
+                f"Analysis ID: {recent_analysis.id}, Status: {recent_analysis.status}, "
+                f"Created: {recent_analysis.created_at}"
+            )
+            # 如果最近的分析失败了，允许重新创建
+            if recent_analysis.status != VideoAnalysisStatus.FAILED:
+                return recent_analysis
+        
+        # 创建新的视频分析记录
+        video_analysis = VideoAnalysis(
+            data_source_id=data_source_id,
+            analysis_type=analysis_type,
+            status=VideoAnalysisStatus.PENDING,
+            task_id=str(uuid.uuid4()),  # 生成唯一任务ID
+            user_id=current_user.id
+        )
+        
+        db.add(video_analysis)
+        await db.commit()
+        await db.refresh(video_analysis)
+        
+        logger.info(f"Created new video analysis: {video_analysis.id} for data_source: {data_source_id}")
+        return video_analysis
+    
+    async def perform_visual_analysis(self, data_source: DataSource, video_analysis: VideoAnalysis, progress_callback=None) -> Dict[str, Any]:
+        """
+        执行视频视觉分析
         
         Args:
-            video_path: 视频文件路径
+            data_source: 数据源对象
+            video_analysis: 视频分析对象
+            progress_callback: 进度回调函数
             
         Returns:
-            详细的元数据字典
+            视觉分析结果
         """
         try:
-            # 使用ffprobe获取详细信息
-            cmd = [
-                'ffprobe', '-v', 'quiet', '-print_format', 'json',
-                '-show_format', '-show_streams', str(video_path)
-            ]
+            logger.info(f"开始视频视觉分析: {data_source.name}")
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            # 构建视频文件路径
+            video_path = Path(settings.upload_dir) / data_source.file_path
+            if not video_path.exists():
+                raise FileNotFoundError(f"视频文件不存在: {video_path}")
             
-            if result.returncode == 0:
-                metadata = json.loads(result.stdout)
-                
-                # 提取有用信息
-                format_info = metadata.get('format', {})
-                streams = metadata.get('streams', [])
-                
-                video_stream = None
-                audio_stream = None
-                
-                for stream in streams:
-                    if stream.get('codec_type') == 'video' and not video_stream:
-                        video_stream = stream
-                    elif stream.get('codec_type') == 'audio' and not audio_stream:
-                        audio_stream = stream
-                
-                enhanced_metadata = {
-                    'format_name': format_info.get('format_name', ''),
-                    'format_long_name': format_info.get('format_long_name', ''),
-                    'duration': float(format_info.get('duration', 0)),
-                    'size': int(format_info.get('size', 0)),
-                    'bit_rate': int(format_info.get('bit_rate', 0)),
-                    'nb_streams': int(format_info.get('nb_streams', 0)),
-                    'nb_programs': int(format_info.get('nb_programs', 0)),
-                    'tags': format_info.get('tags', {})
+            # 创建帧输出目录
+            output_dir = Path(settings.upload_dir) / "video_frames" / str(video_analysis.id)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 1. 提取关键帧
+            logger.info("第1步：提取关键帧")
+            if progress_callback:
+                progress_callback("关键帧提取", 15, "智能提取视频关键帧")
+            
+            key_frames = self.frame_extractor.extract_key_frames(video_path, output_dir)
+            logger.info(f"提取了 {len(key_frames)} 个关键帧")
+            
+            if not key_frames:
+                return {
+                    "error": "未能提取到关键帧",
+                    "visual_analysis": {},
+                    "scene_detection": {},
+                    "frame_count": 0
                 }
-                
-                if video_stream:
-                    # 提取帧率
-                    fps = 0
-                    if video_stream.get('r_frame_rate'):
-                        try:
-                            fps_str = video_stream.get('r_frame_rate', '0/1')
-                            if '/' in fps_str:
-                                num, den = fps_str.split('/')
-                                fps = float(num) / float(den) if float(den) != 0 else 0
-                        except:
-                            fps = 0
-                    
-                    # 提取总帧数
-                    nb_frames = 0
-                    if 'nb_frames' in video_stream:
-                        try:
-                            nb_frames = int(video_stream['nb_frames'])
-                        except (ValueError, TypeError):
-                            # 如果无法从nb_frames获取，尝试通过时长和帧率计算
-                            if fps > 0 and enhanced_metadata.get('duration'):
-                                nb_frames = int(fps * float(enhanced_metadata['duration']))
-                    elif fps > 0 and enhanced_metadata.get('duration'):
-                        # 如果没有nb_frames字段，通过时长和帧率计算
-                        nb_frames = int(fps * float(enhanced_metadata['duration']))
-                    
-                    enhanced_metadata.update({
-                        'width': int(video_stream.get('width', 0)),
-                        'height': int(video_stream.get('height', 0)),
-                        'fps': fps,
-                        'nb_frames': nb_frames,  # 添加总帧数
-                        'video_codec': video_stream.get('codec_name', ''),
-                        'video_codec_long': video_stream.get('codec_long_name', ''),
-                        'video_profile': video_stream.get('profile', ''),
-                        'video_level': video_stream.get('level', ''),
-                        'pixel_format': video_stream.get('pix_fmt', ''),
-                        'color_space': video_stream.get('color_space', ''),
-                        'color_range': video_stream.get('color_range', ''),
-                        'field_order': video_stream.get('field_order', ''),
-                        'video_bit_rate': int(video_stream.get('bit_rate', 0)) if video_stream.get('bit_rate') else 0,
-                        'max_bit_rate': int(video_stream.get('max_bit_rate', 0)) if video_stream.get('max_bit_rate') else 0,
-                        'video_tags': video_stream.get('tags', {})
-                    })
-                
-                # 添加是否有音频的标记
-                enhanced_metadata['has_audio'] = audio_stream is not None
-                
-                if audio_stream:
-                    enhanced_metadata.update({
-                        'audio_codec': audio_stream.get('codec_name', ''),
-                        'audio_codec_long': audio_stream.get('codec_long_name', ''),
-                        'audio_profile': audio_stream.get('profile', ''),
-                        'sample_rate': int(audio_stream.get('sample_rate', 0)),
-                        'channels': int(audio_stream.get('channels', 0)),
-                        'channel_layout': audio_stream.get('channel_layout', ''),
-                        'audio_bit_rate': int(audio_stream.get('bit_rate', 0)) if audio_stream.get('bit_rate') else 0,
-                        'audio_tags': audio_stream.get('tags', {})
-                    })
-                
-                logger.info(f"📊 ffprobe元数据提取成功: {video_path.name}")
-                return enhanced_metadata
-                
-            else:
-                logger.warning(f"ffprobe failed with return code {result.returncode}: {result.stderr}")
-                return {}
-                
-        except subprocess.TimeoutExpired:
-            logger.error(f"ffprobe timeout for {video_path}")
-            return {}
-        except Exception as e:
-            logger.error(f"ffprobe error for {video_path}: {e}")
-            return {}
-    
-    def generate_multiple_thumbnails(self, video_path: Path, count: int = 3) -> List[str]:
-        """
-        生成多个缩略图（开始、中间、结束）
-        
-        Args:
-            video_path: 视频文件路径
-            count: 缩略图数量
             
-        Returns:
-            缩略图路径列表
-        """
-        thumbnails = []
-        
-        try:
-            cap = cv2.VideoCapture(str(video_path))
+            # 2. 视觉语义分析
+            logger.info("第2步：视觉语义分析")
+            if progress_callback:
+                progress_callback("视觉分析", 30, "AI视觉语义理解")
             
-            if not cap.isOpened():
-                logger.error(f"无法打开视频文件: {video_path}")
-                return thumbnails
+            visual_results = await self.vision_service.analyze_video_frames(key_frames)
             
-            # 获取视频基本信息
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
+            # 3. 场景序列分析
+            logger.info("第3步：场景序列分析")
+            if progress_callback:
+                progress_callback("场景分析", 45, "场景序列分析")
             
-            if total_frames <= 0 or fps <= 0:
-                logger.error(f"无法获取视频帧信息: {video_path}")
-                cap.release()
-                return thumbnails
+            scene_results = await self.vision_service.analyze_scene_sequence(key_frames)
             
-            # 创建缩略图目录
-            thumbnails_dir = video_path.parent / "thumbnails"
-            thumbnails_dir.mkdir(exist_ok=True)
-            
-            # 计算缩略图位置
-            positions = []
-            if count == 1:
-                positions = [total_frames // 2]  # 中间位置
-            else:
-                step = total_frames // (count + 1)
-                positions = [step * (i + 1) for i in range(count)]
-            
-            for i, frame_pos in enumerate(positions):
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-                ret, frame = cap.read()
-                
-                if ret:
-                    # 调整缩略图大小
-                    h, w = frame.shape[:2]
-                    if w > 400:
-                        scale = 400 / w
-                        new_w, new_h = int(w * scale), int(h * scale)
-                        frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                    
-                    # 保存缩略图
-                    thumbnail_filename = f"thumb_{video_path.stem}_{i+1}.jpg"
-                    thumbnail_path = thumbnails_dir / thumbnail_filename
-                    
-                    cv2.imwrite(str(thumbnail_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                    thumbnails.append(str(thumbnail_path))
-                    
-                    logger.info(f"生成缩略图 {i+1}/{count}: {thumbnail_path}")
-            
-            cap.release()
-            
-        except Exception as e:
-            logger.error(f"生成缩略图失败: {e}")
-        
-        return thumbnails
-    
-    def analyze_video_content(self, video_path: Path) -> Dict[str, Any]:
-        """
-        分析视频内容特征
-        
-        Args:
-            video_path: 视频文件路径
-            
-        Returns:
-            内容分析结果
-        """
-        try:
-            cap = cv2.VideoCapture(str(video_path))
-            
-            if not cap.isOpened():
-                return {"error": "无法打开视频文件"}
-            
-            # 基本信息
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            
-            # 采样分析（每秒1帧）
-            sample_interval = max(1, int(fps))
-            sample_frames = []
-            
-            frame_count = 0
-            brightness_values = []
-            contrast_values = []
-            
-            while frame_count < total_frames:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
-                ret, frame = cap.read()
-                
-                if not ret:
-                    break
-                
-                # 转换为灰度图进行分析
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                
-                # 计算亮度和对比度
-                brightness = np.mean(gray)
-                contrast = np.std(gray)
-                
-                brightness_values.append(brightness)
-                contrast_values.append(contrast)
-                
-                frame_count += sample_interval
-                
-                # 限制分析帧数（最多100帧）
-                if len(brightness_values) >= 100:
-                    break
-            
-            cap.release()
-            
-            # 计算统计信息
-            avg_brightness = np.mean(brightness_values) if brightness_values else 0
-            avg_contrast = np.mean(contrast_values) if contrast_values else 0
-            brightness_std = np.std(brightness_values) if brightness_values else 0
-            contrast_std = np.std(contrast_values) if contrast_values else 0
-            
-            # 内容特征分析
-            content_analysis = {
-                "brightness_analysis": {
-                    "average": round(avg_brightness, 2),
-                    "std_deviation": round(brightness_std, 2),
-                    "category": self._categorize_brightness(avg_brightness)
-                },
-                "contrast_analysis": {
-                    "average": round(avg_contrast, 2),
-                    "std_deviation": round(contrast_std, 2),
-                    "category": self._categorize_contrast(avg_contrast)
-                },
-                "visual_stability": {
-                    "brightness_stability": "稳定" if brightness_std < 20 else "中等" if brightness_std < 40 else "不稳定",
-                    "contrast_stability": "稳定" if contrast_std < 15 else "中等" if contrast_std < 30 else "不稳定"
-                },
-                "analyzed_frames": len(brightness_values),
-                "sample_rate": f"每秒{1}帧" if sample_interval == fps else f"每{sample_interval}帧采样1次"
-            }
-            
-            logger.info(f"🎯 视频内容分析完成: {video_path.name}")
-            return content_analysis
-            
-        except Exception as e:
-            logger.error(f"视频内容分析失败: {e}")
-            return {"error": str(e)}
-    
-    def _categorize_brightness(self, brightness: float) -> str:
-        """分类亮度级别"""
-        if brightness < 50:
-            return "较暗"
-        elif brightness < 100:
-            return "中等"
-        elif brightness < 150:
-            return "较亮"
-        else:
-            return "很亮"
-    
-    def _categorize_contrast(self, contrast: float) -> str:
-        """分类对比度级别"""
-        if contrast < 20:
-            return "低对比度"
-        elif contrast < 40:
-            return "中等对比度"
-        elif contrast < 60:
-            return "高对比度"
-        else:
-            return "极高对比度"
-    
-    def comprehensive_analysis(self, video_path: Path) -> Dict[str, Any]:
-        """
-        综合视频分析
-        
-        Args:
-            video_path: 视频文件路径
-            
-        Returns:
-            完整的分析结果
-        """
-        try:
-            logger.info(f"🎬 开始综合视频分析: {video_path.name}")
-            
-            # 检查文件格式
-            if not self.is_supported_format(video_path):
-                return {"error": f"不支持的视频格式: {video_path.suffix}"}
-            
-            # 基础分析结果
+            # 4. 构建完整分析结果
             analysis_result = {
-                "analysis_type": "video_enhanced",
-                "file_path": str(video_path),
-                "file_size": video_path.stat().st_size,
-                "format": video_path.suffix[1:].lower()
+                "visual_analysis": visual_results,
+                "scene_detection": scene_results,
+                "frame_extraction": {
+                    "total_frames_extracted": len(key_frames),
+                    "extraction_method": "intelligent_scene_based",
+                    "key_frames_info": [
+                        {
+                            "frame_number": f.frame_number,
+                            "timestamp": f.timestamp,
+                            "key_frame_reason": f.key_frame_reason,
+                            "quality_metrics": {
+                                "brightness": f.brightness,
+                                "contrast": f.contrast,
+                                "sharpness": f.sharpness
+                            }
+                        } for f in key_frames[:10]  # 只返回前10帧的详细信息
+                    ]
+                },
+                "analysis_metadata": {
+                    "video_file": data_source.name,
+                    "file_size": data_source.file_size,
+                    "analysis_type": video_analysis.analysis_type.value,
+                    "processing_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "frame_output_dir": str(output_dir)
+                }
             }
             
-            # 1. 提取详细元数据
-            ffprobe_metadata = self.extract_metadata_with_ffprobe(video_path)
-            if ffprobe_metadata:
-                analysis_result["enhanced_metadata"] = ffprobe_metadata
-            
-            # 2. 生成多个缩略图
-            thumbnails = self.generate_multiple_thumbnails(video_path, count=3)
-            if thumbnails:
-                analysis_result["thumbnails"] = thumbnails
-                analysis_result["primary_thumbnail"] = thumbnails[0]
-            
-            # 3. 内容分析
-            content_analysis = self.analyze_video_content(video_path)
-            if "error" not in content_analysis:
-                analysis_result["content_analysis"] = content_analysis
-            
-            # 4. 生成分析摘要
-            analysis_result["analysis_summary"] = self._generate_analysis_summary(analysis_result)
-            
-            logger.info(f"✅ 综合视频分析完成: {video_path.name}")
+            logger.info(f"视频视觉分析完成: {data_source.name}")
             return analysis_result
             
         except Exception as e:
-            logger.error(f"综合视频分析失败: {e}")
-            return {"error": str(e)}
+            logger.error(f"视频视觉分析失败: {e}")
+            return {
+                "error": str(e),
+                "visual_analysis": {},
+                "scene_detection": {},
+                "frame_extraction": {},
+                "analysis_metadata": {
+                    "video_file": data_source.name if data_source else "unknown",
+                    "error_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "analysis_phase": "visual_analysis"
+                }
+            }
     
-    def _generate_analysis_summary(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-        """生成分析摘要"""
-        summary = {}
-        
-        # 基本信息摘要
-        enhanced_metadata = analysis_result.get("enhanced_metadata", {})
-        if enhanced_metadata:
-            duration = enhanced_metadata.get("duration", 0)
-            size_mb = analysis_result.get("file_size", 0) / (1024 * 1024)
+    async def perform_enhanced_analysis(self, data_source: DataSource, video_analysis: VideoAnalysis, progress_callback=None) -> Dict[str, Any]:
+        """
+        执行增强视频分析（包含视觉+音频）
+        """
+        try:
+            logger.info(f"开始增强视频分析: {data_source.name}")
             
-            summary.update({
-                "duration_formatted": f"{int(duration // 60)}分{int(duration % 60)}秒",
-                "file_size_mb": round(size_mb, 2),
-                "video_codec": enhanced_metadata.get("video_codec", "未知"),
-                "audio_codec": enhanced_metadata.get("audio_codec", "未知"),
-                "has_audio": bool(enhanced_metadata.get("audio_codec")),
-                "bit_rate_kbps": round(enhanced_metadata.get("bit_rate", 0) / 1000, 0) if enhanced_metadata.get("bit_rate") else 0
-            })
-        
-        # 内容分析摘要
-        content_analysis = analysis_result.get("content_analysis", {})
-        if content_analysis:
-            brightness = content_analysis.get("brightness_analysis", {})
-            contrast = content_analysis.get("contrast_analysis", {})
+            # 更新进度：开始分析
+            if progress_callback:
+                progress_callback("视觉分析", 10, "开始视频视觉分析")
             
-            summary.update({
-                "visual_quality": f"{brightness.get('category', '未知')}，{contrast.get('category', '未知')}",
-                "content_stability": content_analysis.get("visual_stability", {}).get("brightness_stability", "未知")
-            })
+            # 1. 执行视觉分析
+            visual_results = await self.perform_visual_analysis(data_source, video_analysis, progress_callback)
+            
+            # 更新进度：视觉分析完成
+            if progress_callback:
+                progress_callback("音频分析", 50, "开始音频语义分析")
+            
+            # 2. 音频分析（Phase 3实现）
+            audio_results = await self.perform_audio_analysis(data_source, video_analysis, progress_callback)
+            
+            # 更新进度：音频分析完成
+            if progress_callback:
+                progress_callback("多模态融合", 80, "开始多模态语义融合")
+            
+            # 3. 多模态融合（Phase 4实现）
+            multimodal_results = await self.perform_multimodal_fusion(visual_results, audio_results, progress_callback)
+            
+            # 更新进度：分析完成
+            if progress_callback:
+                progress_callback("结果整理", 95, "生成综合分析报告")
+            
+            enhanced_result = {
+                "visual_analysis": visual_results.get("visual_analysis", {}),
+                "scene_detection": visual_results.get("scene_detection", {}),
+                "frame_extraction": visual_results.get("frame_extraction", {}),
+                "audio_analysis": audio_results,  # Phase 3 完成
+                "multimodal_fusion": multimodal_results,  # Phase 4 完成
+                "analysis_metadata": {
+                    **visual_results.get("analysis_metadata", {}),
+                    "analysis_mode": "enhanced",
+                    "phases_completed": ["visual_analysis", "audio_analysis", "multimodal_fusion"],
+                    "phases_pending": []
+                }
+            }
+            
+            # 处理错误情况
+            errors = []
+            if visual_results.get("error"):
+                errors.append(f"视觉分析错误: {visual_results['error']}")
+            if audio_results.get("error"):
+                errors.append(f"音频分析错误: {audio_results['error']}")
+            if multimodal_results.get("error"):
+                errors.append(f"多模态融合错误: {multimodal_results['error']}")
+            
+            if errors:
+                enhanced_result["errors"] = errors
+            
+            # 最终进度更新
+            if progress_callback:
+                progress_callback("完成", 100, "视频深度分析完成")
+            
+            logger.info(f"增强视频分析完成: {data_source.name}")
+            return enhanced_result
+            
+        except Exception as e:
+            logger.error(f"增强视频分析失败: {e}")
+            if progress_callback:
+                progress_callback("失败", 0, f"分析失败: {str(e)}")
+            return {
+                "error": str(e),
+                "visual_analysis": {},
+                "scene_detection": {},
+                "frame_extraction": {},
+                "audio_analysis": {},
+                "multimodal_fusion": {},
+                "analysis_metadata": {
+                    "analysis_mode": "enhanced",
+                    "phases_completed": [],
+                    "phases_pending": ["visual_analysis", "audio_analysis", "multimodal_fusion"],
+                    "error": str(e)
+                }
+            }
+    
+    async def perform_audio_analysis(self, data_source: DataSource, video_analysis: VideoAnalysis, progress_callback=None) -> Dict[str, Any]:
+        """
+        执行视频音频分析
         
-        # 缩略图信息
-        thumbnails = analysis_result.get("thumbnails", [])
-        summary["thumbnails_count"] = len(thumbnails)
+        Args:
+            data_source: 数据源对象
+            video_analysis: 视频分析对象
+            progress_callback: 进度回调函数
+            
+        Returns:
+            音频分析结果
+        """
+        try:
+            logger.info(f"开始视频音频分析: {data_source.name}")
+            
+            # 构建视频文件路径
+            video_path = Path(settings.upload_dir) / data_source.file_path
+            if not video_path.exists():
+                raise FileNotFoundError(f"视频文件不存在: {video_path}")
+            
+            # 创建音频输出目录
+            output_dir = Path(settings.upload_dir) / "video_audio" / str(video_analysis.id)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 更新进度：音频提取
+            if progress_callback:
+                progress_callback("音频提取", 55, "提取和预处理音频")
+            
+            # 执行音频分析
+            audio_results = await self.audio_service.analyze_video_audio(video_path, output_dir)
+            
+            # 更新进度：语音识别
+            if progress_callback:
+                progress_callback("语音识别", 65, "Whisper语音转文字")
+            
+            # 更新进度：音频语义分析
+            if progress_callback:
+                progress_callback("音频语义", 75, "音频内容语义分析")
+            
+            # 添加分析元数据
+            audio_results["analysis_metadata"] = {
+                **audio_results.get("analysis_metadata", {}),
+                "video_analysis_id": video_analysis.id,
+                "data_source_id": data_source.id,
+                "analysis_phase": "audio_semantic_analysis"
+            }
+            
+            logger.info(f"视频音频分析完成: {data_source.name}")
+            return audio_results
+            
+        except Exception as e:
+            logger.error(f"视频音频分析失败: {e}")
+            return {
+                "error": str(e),
+                "audio_extraction": {"extraction_success": False},
+                "basic_analysis": {},
+                "enhanced_speech": {},
+                "semantic_analysis": {},
+                "timeline_analysis": {},
+                "analysis_metadata": {
+                    "video_file": data_source.name if data_source else "unknown",
+                    "error_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "analysis_phase": "audio_semantic_analysis"
+                }
+            }
+    
+    async def perform_multimodal_fusion(self, visual_results: Dict[str, Any], audio_results: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
+        """
+        执行多模态融合分析
         
-        return summary
+        Args:
+            visual_results: 视觉分析结果
+            audio_results: 音频分析结果  
+            progress_callback: 进度回调函数
+            
+        Returns:
+            多模态融合结果
+        """
+        try:
+            logger.info("开始多模态语义融合")
+            
+            # 更新进度：多模态融合
+            if progress_callback:
+                progress_callback("多模态融合", 85, "视觉+音频语义融合")
+            
+            # 执行多模态融合
+            fusion_results = await self.multimodal_service.fuse_multimodal_analysis(visual_results, audio_results)
+            
+            # 更新进度：故事分析
+            if progress_callback:
+                progress_callback("故事分析", 90, "情节和关键时刻识别")
+            
+            logger.info("多模态语义融合完成")
+            return fusion_results
+            
+        except Exception as e:
+            logger.error(f"多模态融合失败: {e}")
+            return {
+                "error": str(e),
+                "timeline_alignment": {},
+                "semantic_correlation": {},
+                "story_analysis": {},
+                "emotion_tracking": {},
+                "comprehensive_understanding": {},
+                "analysis_metadata": {
+                    "error_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "analysis_phase": "multimodal_fusion"
+                }
+            }
 
-# 创建全局实例
+    @staticmethod
+    async def get_video_analysis_by_id(
+        db: AsyncSession,
+        analysis_id: int,
+        current_user: User
+    ) -> VideoAnalysis:
+        """
+        获取指定的视频分析，严格权限检查
+        """
+        query = (
+            select(VideoAnalysis)
+            .options(
+                selectinload(VideoAnalysis.frames),
+                selectinload(VideoAnalysis.segments)
+            )
+            .where(VideoAnalysis.id == analysis_id)
+            .where(VideoAnalysis.is_deleted == False)
+        )
+        
+        result = await db.execute(query)
+        analysis = result.scalar_one_or_none()
+        
+        if not analysis:
+            raise NotFoundException(f"Video analysis with ID {analysis_id} not found")
+        
+        # 权限检查：只有所有者可以访问
+        if analysis.user_id != current_user.id:
+            raise AuthorizationException("You don't have permission to access this video analysis")
+        
+        return analysis
+
+    @staticmethod
+    async def get_analyses_by_data_source(
+        db: AsyncSession,
+        data_source_id: int,
+        current_user: User
+    ) -> List[VideoAnalysis]:
+        """
+        获取指定数据源的所有视频分析
+        """
+        # 先验证数据源访问权限
+        await VideoAnalysisService._validate_data_source_access(db, data_source_id, current_user)
+        
+        query = (
+            select(VideoAnalysis)
+            .where(VideoAnalysis.data_source_id == data_source_id)
+            .where(VideoAnalysis.is_deleted == False)
+            .order_by(VideoAnalysis.created_at.desc())
+        )
+        
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    @staticmethod
+    async def update_video_analysis(
+        db: AsyncSession,
+        analysis_id: int,
+        update_data: VideoAnalysisUpdate,
+        current_user: User
+    ) -> VideoAnalysis:
+        """
+        更新视频分析，遵循权限检查
+        """
+        # 先获取并验证权限
+        analysis = await VideoAnalysisService.get_video_analysis_by_id(db, analysis_id, current_user)
+        
+        # 更新字段
+        update_dict = update_data.model_dump(exclude_unset=True)
+        for field, value in update_dict.items():
+            setattr(analysis, field, value)
+        
+        analysis.updated_at = datetime.now(timezone.utc)
+        
+        await db.commit()
+        await db.refresh(analysis)
+        
+        return analysis
+
+    @staticmethod
+    async def delete_video_analysis(
+        db: AsyncSession,
+        analysis_id: int,
+        current_user: User
+    ) -> None:
+        """
+        删除视频分析（软删除）
+        """
+        # 先获取并验证权限
+        analysis = await VideoAnalysisService.get_video_analysis_by_id(db, analysis_id, current_user)
+        
+        # 软删除
+        analysis.is_deleted = True
+        analysis.deleted_at = datetime.now(timezone.utc)
+        
+        await db.commit()
+        logger.info(f"Video analysis {analysis_id} marked as deleted")
+
+    @staticmethod
+    async def _validate_data_source_access(
+        db: AsyncSession,
+        data_source_id: int,
+        current_user: User
+    ) -> DataSource:
+        """
+        验证数据源存在且用户有权限访问
+        严格遵循现有的权限检查模式
+        """
+        # 查询数据源
+        result = await db.execute(
+            select(DataSource).where(
+                DataSource.id == data_source_id,
+                DataSource.is_deleted == False
+            )
+        )
+        data_source = result.scalar_one_or_none()
+        
+        if not data_source:
+            raise NotFoundException("Data Source", data_source_id)
+        
+        # 权限检查：只有所有者可以访问
+        if data_source.user_id != current_user.id:
+            raise AuthorizationException("You don't have permission to access this data source")
+        
+        return data_source
+
+    @staticmethod
+    async def _get_active_analysis(db: AsyncSession, data_source_id: int) -> Optional[VideoAnalysis]:
+        """
+        检查是否有进行中的分析任务
+        """
+        result = await db.execute(
+            select(VideoAnalysis).where(
+                VideoAnalysis.data_source_id == data_source_id,
+                VideoAnalysis.status.in_([
+                    VideoAnalysisStatus.PENDING,
+                    VideoAnalysisStatus.IN_PROGRESS
+                ]),
+                VideoAnalysis.is_deleted == False
+            )
+        )
+        return result.scalar_one_or_none()
+
+    # VideoFrame相关方法
+    @staticmethod
+    async def create_video_frame(
+        db: AsyncSession,
+        video_analysis_id: int,
+        frame_data: Dict[str, Any]
+    ) -> VideoFrame:
+        """创建视频帧记录"""
+        video_frame = VideoFrame(
+            video_analysis_id=video_analysis_id,
+            **frame_data
+        )
+        
+        db.add(video_frame)
+        await db.commit()
+        await db.refresh(video_frame)
+        
+        return video_frame
+
+    @staticmethod
+    async def get_video_frames(
+        db: AsyncSession,
+        video_analysis_id: int
+    ) -> List[VideoFrame]:
+        """获取分析的所有帧"""
+        query = (
+            select(VideoFrame)
+            .where(VideoFrame.video_analysis_id == video_analysis_id)
+            .where(VideoFrame.is_deleted == False)
+            .order_by(VideoFrame.frame_number)
+        )
+        
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    # VideoSegment相关方法
+    @staticmethod
+    async def create_video_segment(
+        db: AsyncSession,
+        video_analysis_id: int,
+        segment_data: Dict[str, Any]
+    ) -> VideoSegment:
+        """创建视频片段记录"""
+        video_segment = VideoSegment(
+            video_analysis_id=video_analysis_id,
+            **segment_data
+        )
+        
+        db.add(video_segment)
+        await db.commit()
+        await db.refresh(video_segment)
+        
+        return video_segment
+
+    @staticmethod
+    async def get_video_segments(
+        db: AsyncSession,
+        video_analysis_id: int
+    ) -> List[VideoSegment]:
+        """获取分析的所有片段"""
+        query = (
+            select(VideoSegment)
+            .where(VideoSegment.video_analysis_id == video_analysis_id)
+            .where(VideoSegment.is_deleted == False)
+            .order_by(VideoSegment.start_time)
+        )
+        
+        result = await db.execute(query)
+        return result.scalars().all()
+
+
+# 创建全局服务实例
 video_analysis_service = VideoAnalysisService() 

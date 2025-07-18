@@ -6,7 +6,7 @@ psycopg2-binary==2.9.9
 pg8000==1.30.3
 alembic==1.13.2
 celery==5.4.0
-pydantic==2.8.2
+pydantic
 pydantic-settings==2.4.0
 PyJWT==2.8.0
 pymilvus==2.4.4
@@ -34,7 +34,6 @@ scikit-learn==1.5.1
 sumy==0.11.0
 nltk==3.8.1
 jieba==0.42.1
-scikit-learn==1.5.1
 transformers
 langdetect==1.0.9
 snownlp==0.12.3
@@ -42,7 +41,8 @@ sentence-transformers
 langchain==0.3.26
 langchain-community==0.3.27
 langchain-core==0.3.68
-ollama==0.3.0
+langchain-ollama==0.3.1
+ollama>=0.4.4,<0.6.0
 
 # Image Processing
 Pillow==10.4.0
@@ -67,9 +67,6 @@ openai-whisper==20240930
 torch==2.5.1+cu121
 torchaudio==2.5.1+cu121
 
-# Vector DB
-pymilvus
-
 # Graph DB
 neo4j==5.22.0
 
@@ -88,7 +85,6 @@ gunicorn
 pytest
 pytest-asyncio
 httpx
-requests
 coverage
 Faker
 yarl==1.9.4

@@ -45,7 +45,7 @@ class LLMService:
             1.  摘要必须保留原文的核心观点和关键信息。
             2.  摘要必须是对原文的重新表述和浓缩，绝不能直接复制原文的句子。
             3.  最终输出的摘要长度必须严格控制在200字以内。
-            4.  你的输出只能包含摘要文本本身，禁止添加任何前缀、标题或解释性文字（例如，不要说“这是摘要：”）。
+            4.  你的输出只能包含摘要文本本身，禁止添加任何前缀、标题或解释性文字（例如，不要说"这是摘要："）。
 
             <|user|>
             请为以下文本生成摘要：
@@ -73,3 +73,51 @@ class LLMService:
         except Exception as e:
             logger.error(f"Failed to generate summary with LLM (deepseek-r1:8b): {e}", exc_info=True)
             return "" # 在失败时返回空字符串，以便触发降级逻辑 
+
+    @staticmethod
+    async def generate_response(prompt: str, temperature: float = 0.7) -> str:
+        """
+        使用本地Ollama中的大模型为给定提示生成响应。
+        这是一个通用的文本生成方法，被视频分析服务广泛使用。
+
+        Args:
+            prompt: 输入的提示文本
+            temperature: 生成温度，控制输出的随机性
+
+        Returns:
+            生成的响应文本。如果生成失败，则返回空字符串。
+        """
+        if not prompt or not prompt.strip():
+            return ""
+
+        try:
+            logger.info("Initializing LLM for response generation (model: deepseek-r1:8b)...")
+            # 初始化Ollama LLM，明确指向在主机上运行的Ollama服务
+            llm = ChatOllama(
+                base_url="http://host.docker.internal:11435",
+                model="deepseek-r1:8b", 
+                temperature=temperature
+            )
+
+            # 直接创建消息，不使用复杂的模板
+            messages = [
+                ("system", "你是一个专业的AI助手，能够理解和分析各种内容。请根据用户的要求提供准确、有用的回答。"),
+                ("user", prompt)
+            ]
+            
+            logger.info("Invoking LLM to generate response...")
+            # 直接调用LLM，避免复杂的链式调用
+            response = await llm.ainvoke(messages)
+            logger.info("Successfully generated response from LLM.")
+
+            # 获取响应内容
+            response_content = response.content if hasattr(response, 'content') else str(response)
+            
+            # 清理模型输出中可能包含的<think>标签和内容
+            cleaned_response = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL)
+
+            return cleaned_response.strip()
+
+        except Exception as e:
+            logger.error(f"Failed to generate response with LLM (deepseek-r1:8b): {e}", exc_info=True)
+            return "" # 在失败时返回空字符串 
