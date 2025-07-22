@@ -116,7 +116,7 @@ class Settings(BaseSettings):
         async_url = values.data.get("database_url")
         if async_url:
             return async_url.replace("+asyncpg", "")
-        raise ValueError("DATABASE_URL must be set to generate SYNC_DATABASE_URL")
+        raise ValueError("database_url must be set to generate sync_database_url")
     
     @field_validator("cors_origins", "allowed_extensions", mode='before')
     def parse_str_to_list(cls, v):

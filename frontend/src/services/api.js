@@ -144,6 +144,10 @@ export const getVideoAnalysisStatus = (analysisId) => {
     return apiClient.get(`/video-analysis/${analysisId}/status`);
 };
 
+export const getVideoAnalysisStatusByDataSource = (dataSourceId) => {
+    return apiClient.get(`/video-analysis/data-source/${dataSourceId}/status`);
+};
+
 // 添加视频深度分析任务轮询方法
 export const pollVideoAnalysisStatus = async (analysisId, onProgress, maxAttempts = 120) => { // 增加到120次 = 10分钟
     let attempts = 0;

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as api from '../services/api';
 import ProfilingReport from '../components/ProfilingReport';
+import VideoAnalysisReport from '../components/VideoAnalysisReport';
 import VideoDeepAnalysisProgress from '../components/VideoDeepAnalysisProgress';
 import { useTaskPolling } from '../utils/useTaskPolling';
 import Layout from '../components/Layout';
@@ -20,6 +21,7 @@ const DataSourceDetail = () => {
     // 视频深度分析相关状态
     const [videoAnalysisId, setVideoAnalysisId] = useState(null);
     const [showVideoProgress, setShowVideoProgress] = useState(false);
+    const [videoAnalysisResult, setVideoAnalysisResult] = useState(null);
 
     const { 
         taskStatus, 
@@ -35,6 +37,32 @@ const DataSourceDetail = () => {
             try {
                 const response = await api.getDataSourceDetail(projectId, dataSourceId);
                 setDataSource(response.data);
+                
+                // 如果是视频文件，尝试获取视频分析数据
+                if (response.data.analysis_category === 'VIDEO') {
+                    try {
+                        const videoAnalysisResponse = await api.getVideoAnalysisStatusByDataSource(dataSourceId);
+                        if (videoAnalysisResponse.data) {
+                            console.log('Video analysis response:', videoAnalysisResponse.data);
+                            
+                            // 检查是否有完整的分析结果
+                            if (videoAnalysisResponse.data.analysis_result) {
+                                setVideoAnalysisResult(videoAnalysisResponse.data.analysis_result);
+                                console.log('Video analysis result loaded:', videoAnalysisResponse.data.analysis_result);
+                            } else {
+                                console.log('Video analysis status:', videoAnalysisResponse.data.status);
+                                // 如果没有结果但状态是完成，显示警告
+                                if (videoAnalysisResponse.data.status === 'COMPLETED') {
+                                    console.warn('Video analysis is COMPLETED but no analysis_result found');
+                                }
+                            }
+                        }
+                    } catch (videoError) {
+                        console.error('Failed to fetch video analysis result:', videoError);
+                        // 视频分析结果获取失败不影响主要功能，继续正常流程
+                    }
+                }
+                
                 if (response.data.task_id && (response.data.profile_status === 'in_progress' || response.data.profile_status === 'pending')) {
                     startPolling(response.data.task_id);
                 }
@@ -301,8 +329,14 @@ const DataSourceDetail = () => {
                             />
                         )}
 
-                         {/* Analysis Results */}
-                        {(taskStatus === 'completed' || reportData) && reportData && !showVideoProgress && (
+                        {/* Video Deep Analysis Results (视频类型专用显示) */}
+                        {dataSource?.analysis_category === 'VIDEO' && videoAnalysisResult && !showVideoProgress && (
+                            <VideoAnalysisReport result={videoAnalysisResult} filePath={dataSource?.file_path} />
+                        )}
+                        
+                        {/* Regular Analysis Results (非视频类型显示，或视频类型无深度分析结果时显示) */}
+                        {(taskStatus === 'completed' || reportData) && reportData && !showVideoProgress && 
+                         !(dataSource?.analysis_category === 'VIDEO' && videoAnalysisResult) && (
                             <ProfilingReport report={reportData} dataSource={dataSource} />
                         )}
                     </div>

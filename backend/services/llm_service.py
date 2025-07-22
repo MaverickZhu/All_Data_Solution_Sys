@@ -4,6 +4,7 @@ LLM 服务
 """
 import logging
 import re
+import asyncio
 from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -14,6 +15,10 @@ class LLMService:
     """
     提供与大语言模型交互的服务。
     """
+    
+    DEFAULT_TIMEOUT = 30  # 默认30秒超时
+    MAX_TIMEOUT = 120     # 最大120秒超时
+    
     @staticmethod
     async def generate_summary(text_content: str) -> str:
         """
@@ -29,12 +34,20 @@ class LLMService:
             return ""
 
         try:
-            logger.info("Initializing LLM for summarization (model: deepseek-r1:8b)...")
+            logger.info("Initializing LLM for summarization (model: deepseek-r1:8b, think=disabled)...")
             # 初始化Ollama LLM，明确指向在主机上运行的Ollama服务
             llm = ChatOllama(
                 base_url="http://host.docker.internal:11435",
                 model="deepseek-r1:8b", 
-                temperature=0.6
+                temperature=0.6,
+                timeout=30,
+                # 关闭think模式，直接输出结果
+                format="json",
+                options={
+                    "num_predict": 512,
+                    "stop": ["<think>", "</think>"],
+                    "temperature": 0.6
+                }
             )
 
             # 创建一个更强大、更具指令性的专业摘要提示模板
@@ -61,8 +74,11 @@ class LLMService:
             chain = prompt | llm | output_parser
 
             logger.info("Invoking LLM chain to generate summary...")
-            # 异步调用链
-            summary = await chain.ainvoke({"input": text_content})
+            # 异步调用链，添加超时保护
+            summary = await asyncio.wait_for(
+                chain.ainvoke({"input": text_content}), 
+                timeout=60
+            )
             logger.info("Successfully generated summary from LLM.")
 
             # 清理模型输出中可能包含的<think>标签和内容
@@ -70,12 +86,15 @@ class LLMService:
 
             return cleaned_summary.strip()
 
+        except asyncio.TimeoutError:
+            logger.error("LLM summarization timed out after 60 seconds")
+            return ""
         except Exception as e:
             logger.error(f"Failed to generate summary with LLM (deepseek-r1:8b): {e}", exc_info=True)
             return "" # 在失败时返回空字符串，以便触发降级逻辑 
 
     @staticmethod
-    async def generate_response(prompt: str, temperature: float = 0.7) -> str:
+    async def generate_response(prompt: str, temperature: float = 0.7, timeout: int = None) -> str:
         """
         使用本地Ollama中的大模型为给定提示生成响应。
         这是一个通用的文本生成方法，被视频分析服务广泛使用。
@@ -83,6 +102,7 @@ class LLMService:
         Args:
             prompt: 输入的提示文本
             temperature: 生成温度，控制输出的随机性
+            timeout: 超时时间（秒），默认30秒
 
         Returns:
             生成的响应文本。如果生成失败，则返回空字符串。
@@ -90,13 +110,25 @@ class LLMService:
         if not prompt or not prompt.strip():
             return ""
 
+        # 设置超时时间
+        if timeout is None:
+            timeout = LLMService.DEFAULT_TIMEOUT
+        timeout = min(timeout, LLMService.MAX_TIMEOUT)  # 限制最大超时时间
+
         try:
-            logger.info("Initializing LLM for response generation (model: deepseek-r1:8b)...")
+            logger.info(f"Initializing LLM for response generation (model: deepseek-r1:8b, think=disabled, timeout: {timeout}s)...")
             # 初始化Ollama LLM，明确指向在主机上运行的Ollama服务
             llm = ChatOllama(
                 base_url="http://host.docker.internal:11435",
                 model="deepseek-r1:8b", 
-                temperature=temperature
+                temperature=temperature,
+                timeout=timeout,
+                # 关闭think模式，直接输出结果
+                options={
+                    "num_predict": 1024,
+                    "stop": ["<think>", "</think>"],
+                    "temperature": temperature
+                }
             )
 
             # 直接创建消息，不使用复杂的模板
@@ -105,9 +137,12 @@ class LLMService:
                 ("user", prompt)
             ]
             
-            logger.info("Invoking LLM to generate response...")
-            # 直接调用LLM，避免复杂的链式调用
-            response = await llm.ainvoke(messages)
+            logger.info(f"Invoking LLM to generate response (timeout: {timeout}s)...")
+            # 直接调用LLM，添加asyncio超时保护
+            response = await asyncio.wait_for(
+                llm.ainvoke(messages), 
+                timeout=timeout
+            )
             logger.info("Successfully generated response from LLM.")
 
             # 获取响应内容
@@ -118,6 +153,9 @@ class LLMService:
 
             return cleaned_response.strip()
 
+        except asyncio.TimeoutError:
+            logger.error(f"LLM response generation timed out after {timeout} seconds")
+            return ""
         except Exception as e:
             logger.error(f"Failed to generate response with LLM (deepseek-r1:8b): {e}", exc_info=True)
             return "" # 在失败时返回空字符串 

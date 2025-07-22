@@ -35,6 +35,7 @@ async def create_video_analysis(
     """
     创建视频分析任务
     遵循现有API端点的设计模式和权限检查
+    添加幂等性检查，防止重复分析
     """
     logger.debug(f"Creating video analysis for data_source_id: {data_source_id}")
     
@@ -43,6 +44,35 @@ async def create_video_analysis(
             f"Starting video analysis creation: data_source_id={data_source_id}, type={analysis_type} by user: {current_user.email}",
             extra={"data_source_id": data_source_id, "analysis_type": analysis_type, "user": current_user.email}
         )
+        
+        # 🔥 强化幂等性检查：基于data_source_id防止重复分析
+        existing_analysis = await VideoAnalysisService.get_latest_analysis_by_data_source(
+            db, data_source_id, current_user
+        )
+        
+        if existing_analysis:
+            # 如果分析状态为进行中，返回现有分析
+            if existing_analysis.status in [VideoAnalysisStatus.PENDING, VideoAnalysisStatus.IN_PROGRESS]:
+                logger.info(
+                    f"Found existing active analysis: ID={existing_analysis.id}, status={existing_analysis.status}",
+                    extra={"video_analysis_id": existing_analysis.id, "status": existing_analysis.status}
+                )
+                return existing_analysis
+            
+            # 🔥 关键修复：如果分析已完成，也返回现有分析，不要重复创建！
+            elif existing_analysis.status == VideoAnalysisStatus.COMPLETED:
+                logger.info(
+                    f"Found existing completed analysis: ID={existing_analysis.id}, returning existing result",
+                    extra={"video_analysis_id": existing_analysis.id, "status": existing_analysis.status}
+                )
+                return existing_analysis
+            
+            # 只有在分析失败时才允许重新分析
+            elif existing_analysis.status == VideoAnalysisStatus.FAILED:
+                logger.info(
+                    f"Previous analysis failed (ID={existing_analysis.id}), creating new analysis",
+                    extra={"previous_analysis_id": existing_analysis.id, "status": existing_analysis.status}
+                )
         
         # 创建视频分析
         video_analysis = await VideoAnalysisService.create_video_analysis(
@@ -150,6 +180,92 @@ async def get_video_analysis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve video analysis"
+        )
+
+
+@router.get(
+    "/{analysis_id}/status",
+    response_model=dict
+)
+async def get_video_analysis_status(
+    analysis_id: int = Path(..., description="The ID of the video analysis"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    获取视频分析状态（用于前端轮询）
+    按analysis_id查询分析状态
+    """
+    logger.debug(f"Getting video analysis status by analysis_id: {analysis_id}")
+    
+    try:
+        video_analysis = await VideoAnalysisService.get_video_analysis_by_id(
+            db, analysis_id, current_user
+        )
+        
+        # 转换数据格式以符合API模型要求
+        if video_analysis.visual_objects:
+            # 如果visual_objects是字符串列表，转换为字典列表
+            if isinstance(video_analysis.visual_objects, list) and video_analysis.visual_objects:
+                if isinstance(video_analysis.visual_objects[0], str):
+                    video_analysis.visual_objects = [
+                        {"name": obj, "confidence": 1.0, "category": "detected"} 
+                        for obj in video_analysis.visual_objects
+                    ]
+        
+        # 确保scene_changes格式正确
+        if video_analysis.scene_changes:
+            if isinstance(video_analysis.scene_changes, list) and video_analysis.scene_changes:
+                if isinstance(video_analysis.scene_changes[0], (int, float)):
+                    video_analysis.scene_changes = [
+                        {"timestamp": change, "type": "scene_change"} 
+                        for change in video_analysis.scene_changes
+                    ]
+        
+        status_info = {
+            "analysis_id": video_analysis.id,
+            "data_source_id": video_analysis.data_source_id,
+            "status": video_analysis.status,
+            "task_id": video_analysis.task_id,
+            "processing_time": video_analysis.processing_time,
+            "error_message": video_analysis.error_message,
+            "current_phase": video_analysis.current_phase,
+            "progress_percentage": video_analysis.progress_percentage,
+            "progress_message": video_analysis.progress_message,
+            "created_at": video_analysis.created_at,
+            "updated_at": video_analysis.updated_at,
+            
+            # 🔥 添加完整的分析结果用于前端展示
+            "analysis_result": {
+                "scene_count": video_analysis.scene_count,
+                "key_frames": video_analysis.key_frames,
+                "visual_themes": video_analysis.visual_themes,
+                "visual_objects": video_analysis.visual_objects,
+                "speech_segments": video_analysis.speech_segments,
+                "content_tags": video_analysis.content_tags,
+                "comprehensive_summary": video_analysis.comprehensive_summary,
+                "story_segments": video_analysis.story_segments,
+                "key_moments": video_analysis.key_moments,
+                "scene_changes": video_analysis.scene_changes,
+                "transcription": video_analysis.transcription,
+                "model_versions": video_analysis.model_versions
+            } if video_analysis.status == 'COMPLETED' else None
+        }
+        
+        logger.info(
+            f"Video analysis status retrieved successfully: ID={analysis_id}, status={video_analysis.status}",
+            extra={"video_analysis_id": analysis_id, "status": video_analysis.status}
+        )
+        
+        return status_info
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get video analysis status {analysis_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve video analysis status"
         )
 
 
@@ -323,6 +439,150 @@ async def get_video_analysis_status(
         raise
     except Exception as e:
         logger.error(f"Failed to get video analysis status {analysis_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve video analysis status"
+        )
+
+
+@router.get(
+    "/data-source/{data_source_id}/status",
+    response_model=dict
+)
+async def get_video_analysis_status_by_data_source(
+    data_source_id: int = Path(..., description="The ID of the data source"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    通过数据源ID获取视频分析状态和完整结果
+    用于前端轮询检查分析进度并获取完整的分析结果
+    """
+    logger.debug(f"Getting video analysis status by data_source_id: {data_source_id}")
+    
+    try:
+        # 通过data_source_id查找最新的视频分析记录
+        video_analysis = await VideoAnalysisService.get_latest_analysis_by_data_source(
+            db, data_source_id, current_user
+        )
+        
+        if not video_analysis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No video analysis found for this data source"
+            )
+        
+        # 转换数据格式以符合API模型要求
+        if video_analysis.visual_objects:
+            # 如果visual_objects是字符串列表，转换为字典列表
+            if isinstance(video_analysis.visual_objects, list) and video_analysis.visual_objects:
+                if isinstance(video_analysis.visual_objects[0], str):
+                    video_analysis.visual_objects = [
+                        {"name": obj, "confidence": 1.0, "category": "detected"} 
+                        for obj in video_analysis.visual_objects
+                    ]
+        
+        # 确保scene_changes格式正确
+        if video_analysis.scene_changes:
+            if isinstance(video_analysis.scene_changes, list) and video_analysis.scene_changes:
+                if isinstance(video_analysis.scene_changes[0], (int, float)):
+                    video_analysis.scene_changes = [
+                        {"timestamp": change, "type": "scene_change"} 
+                        for change in video_analysis.scene_changes
+                    ]
+        
+        status_info = {
+            "analysis_id": video_analysis.id,
+            "data_source_id": data_source_id,
+            "status": video_analysis.status,
+            "task_id": video_analysis.task_id,
+            "processing_time": video_analysis.processing_time,
+            "error_message": video_analysis.error_message,
+            "current_phase": video_analysis.current_phase,
+            "progress_percentage": video_analysis.progress_percentage,
+            "progress_message": video_analysis.progress_message,
+            "created_at": video_analysis.created_at,
+            "updated_at": video_analysis.updated_at
+        }
+        
+        # 🔥 关键修复：如果分析已完成，从MongoDB获取完整的分析结果
+        if video_analysis.status == VideoAnalysisStatus.COMPLETED:
+            from backend.services.mongo_service import mongo_service
+            
+            # 获取基础视频分析结果（包含基本视频属性）
+            basic_analysis_result = mongo_service.get_video_analysis_results(data_source_id)
+            
+            # 获取深度分析结果（包含高级分析）
+            deep_analysis_result = mongo_service.get_video_deep_analysis_results(video_analysis.id)
+            
+            if basic_analysis_result:
+                # 构建合并的分析结果
+                merged_result = {
+                    "analysis_type": "video_enhanced" if deep_analysis_result else "video",
+                    # 基础视频属性
+                    "video_properties": basic_analysis_result.get("video_properties", {}),
+                    "file_info": basic_analysis_result.get("file_info", {}),
+                    "metadata": basic_analysis_result.get("metadata", {}),
+                    "quality_info": basic_analysis_result.get("quality_info", {}),
+                    "analysis_summary": basic_analysis_result.get("analysis_summary", {}),
+                }
+                
+                # 如果有深度分析结果，添加增强功能
+                if deep_analysis_result:
+                    # 从基础信息构建enhanced_metadata
+                    video_props = basic_analysis_result.get("video_properties", {})
+                    file_info = basic_analysis_result.get("file_info", {})
+                    
+                    merged_result.update({
+                        "enhanced_metadata": {
+                            "width": video_props.get("width"),
+                            "height": video_props.get("height"),
+                            "fps": video_props.get("fps"),
+                            "duration": video_props.get("duration_seconds"),
+                            "nb_frames": video_props.get("frame_count"),
+                            "format_name": file_info.get("format"),
+                            "has_audio": True,  # 大多数视频都有音频
+                            "video_codec": "h264",  # 默认值
+                            "audio_codec": "aac",   # 默认值
+                        },
+                        "visual_analysis": deep_analysis_result.get("visual_analysis", {}),
+                        "audio_analysis": deep_analysis_result.get("audio_analysis", {}),
+                        "scene_detection": deep_analysis_result.get("scene_detection", {}),
+                        "multimodal_fusion": deep_analysis_result.get("multimodal_fusion", {}),
+                        "analysis_metadata": deep_analysis_result.get("analysis_metadata", {}),
+                    })
+                    
+                    # 添加缩略图路径
+                    thumbnail_path = video_props.get("thumbnail_path")
+                    if thumbnail_path:
+                        merged_result["primary_thumbnail"] = thumbnail_path
+                
+                # 添加文件大小
+                file_size = file_info.get("file_size_bytes")
+                if file_size:
+                    merged_result["file_size"] = file_size
+                    
+                # 添加格式信息
+                format_name = file_info.get("format")
+                if format_name:
+                    merged_result["format"] = format_name
+                
+                status_info["analysis_result"] = merged_result
+                logger.info(f"Successfully merged analysis results for data_source_id: {data_source_id}, video_analysis_id: {video_analysis.id}")
+            else:
+                logger.warning(f"No basic analysis result found in MongoDB for data_source_id: {data_source_id}")
+        
+        logger.info(
+            f"Video analysis status retrieved by data_source_id: data_source_id={data_source_id}, analysis_id={video_analysis.id}, status={video_analysis.status}",
+            extra={"data_source_id": data_source_id, "video_analysis_id": video_analysis.id, "status": video_analysis.status}
+        )
+        
+        return status_info
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get video analysis status for data_source_id {data_source_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve video analysis status"

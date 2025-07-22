@@ -40,7 +40,8 @@ class VideoMultimodalService:
         audio_results: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        融合多模态分析结果
+        融合多模态分析结果 - 优化版本
+        将原来的16次LLM调用优化为3次高效调用
         
         Args:
             visual_results: 视觉分析结果
@@ -50,52 +51,42 @@ class VideoMultimodalService:
             融合后的多模态分析结果
         """
         try:
-            logger.info("开始多模态语义融合...")
+            logger.info("开始优化的多模态语义融合...")
             
-            # 1. 时间轴对齐
+            # 1. 时间轴对齐（无需LLM，纯算法处理）
             logger.info("第1步：时间轴对齐")
             timeline_alignment = await self._align_timelines(visual_results, audio_results)
             
-            # 2. 跨模态语义关联
-            logger.info("第2步：跨模态语义关联")
-            semantic_correlation = await self._correlate_semantics(visual_results, audio_results, timeline_alignment)
+            # 2. 视觉内容统一分析（1次LLM调用）
+            logger.info("第2步：视觉内容综合分析")
+            visual_comprehensive = await self._analyze_visual_comprehensive(visual_results)
             
-            # 3. 故事情节分析
-            logger.info("第3步：故事情节分析")
-            story_analysis = await self._analyze_story_structure(visual_results, audio_results, semantic_correlation)
+            # 3. 音频内容统一分析（1次LLM调用）
+            logger.info("第3步：音频内容综合分析") 
+            audio_comprehensive = await self._analyze_audio_comprehensive(audio_results)
             
-            # 4. 情感变化追踪
-            logger.info("第4步：情感变化追踪")
-            emotion_tracking = await self._track_emotion_changes(visual_results, audio_results, timeline_alignment)
-            
-            # 5. 综合理解生成
-            logger.info("第5步：综合理解生成")
-            comprehensive_understanding = await self._generate_comprehensive_understanding(
-                visual_results, audio_results, semantic_correlation, story_analysis, emotion_tracking
+            # 4. 最终多模态整合（1次LLM调用）
+            logger.info("第4步：多模态最终整合")
+            final_integration = await self._integrate_multimodal_final(
+                visual_comprehensive, audio_comprehensive, timeline_alignment
             )
             
-            # 6. 构建融合结果
+            # 5. 构建融合结果
             fusion_result = {
                 "timeline_alignment": timeline_alignment,
-                "semantic_correlation": semantic_correlation,
-                "story_analysis": story_analysis,
-                "emotion_tracking": emotion_tracking,
-                "comprehensive_understanding": comprehensive_understanding,
+                "visual_comprehensive": visual_comprehensive,
+                "audio_comprehensive": audio_comprehensive,
+                "final_integration": final_integration,
                 "fusion_metadata": {
                     "fusion_timestamp": datetime.now(timezone.utc).isoformat(),
-                    "fusion_type": "multimodal_semantic_fusion",
+                    "fusion_type": "optimized_multimodal_fusion",
                     "modalities_fused": ["visual", "audio"],
-                    "fusion_algorithms": [
-                        "timeline_alignment",
-                        "semantic_correlation", 
-                        "story_analysis",
-                        "emotion_tracking",
-                        "comprehensive_understanding"
-                    ]
+                    "llm_calls_count": 3,  # 优化后仅3次LLM调用
+                    "optimization_strategy": "consolidated_analysis"
                 }
             }
             
-            logger.info("多模态语义融合完成")
+            logger.info("优化的多模态语义融合完成（仅3次LLM调用）")
             return fusion_result
             
         except Exception as e:
@@ -103,16 +94,168 @@ class VideoMultimodalService:
             return {
                 "error": str(e),
                 "timeline_alignment": {},
-                "semantic_correlation": {},
-                "story_analysis": {},
-                "emotion_tracking": {},
-                "comprehensive_understanding": {},
-                "fusion_metadata": {
-                    "fusion_timestamp": datetime.now(timezone.utc).isoformat(),
-                    "fusion_type": "multimodal_semantic_fusion",
-                    "error": str(e)
-                }
+                "visual_comprehensive": {},
+                "audio_comprehensive": {},
+                "final_integration": {}
             }
+
+    async def _analyze_visual_comprehensive(self, visual_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        视觉内容综合分析 - 单次LLM调用处理所有视觉分析
+        替代原来的多次分散调用
+        """
+        try:
+            # 提取所有视觉信息
+            visual_analysis = visual_results.get("visual_analysis", {})
+            scene_detection = visual_results.get("scene_detection", {})
+            frame_extraction = visual_analysis.get("frame_extraction", {})
+            
+            # 构建综合分析提示
+            comprehensive_prompt = f"""
+            请对以下视频视觉内容进行综合分析，返回JSON格式结果：
+
+            视觉主题: {visual_analysis.get("visual_themes", [])}
+            检测对象: {visual_analysis.get("detected_objects", [])}
+            场景信息: {scene_detection}
+            关键帧信息: {frame_extraction}
+
+            请返回JSON格式的综合分析：
+            {{
+                "visual_summary": "视觉内容总体描述",
+                "main_themes": ["主要视觉主题1", "主要视觉主题2"],
+                "scene_types": ["场景类型1", "场景类型2"],
+                "visual_emotion": "从视觉推断的整体情感",
+                "key_objects": ["重要对象1", "重要对象2"],
+                "visual_style": "视觉风格描述",
+                "scene_progression": "场景变化描述"
+            }}
+            """
+            
+            response = await self.llm_service.generate_response(comprehensive_prompt, timeout=30)
+            
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                return {
+                    "visual_summary": "视觉分析失败",
+                    "main_themes": visual_analysis.get("visual_themes", [])[:3],
+                    "scene_types": ["unknown"],
+                    "visual_emotion": "neutral",
+                    "key_objects": visual_analysis.get("detected_objects", [])[:5],
+                    "visual_style": "unknown",
+                    "scene_progression": "无法分析"
+                }
+                
+        except Exception as e:
+            logger.error(f"视觉综合分析失败: {e}")
+            return {"error": str(e)}
+
+    async def _analyze_audio_comprehensive(self, audio_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        音频内容综合分析 - 单次LLM调用处理所有音频分析
+        替代原来的多次分散调用
+        """
+        try:
+            # 提取所有音频信息
+            enhanced_speech = audio_results.get("enhanced_speech", {})
+            semantic_analysis = audio_results.get("semantic_analysis", {})
+            timeline_analysis = audio_results.get("timeline_analysis", {})
+            
+            # 构建综合分析提示
+            comprehensive_prompt = f"""
+            请对以下视频音频内容进行综合分析，返回JSON格式结果：
+
+            语音转录: {enhanced_speech.get("full_text", "")[:1000]}
+            主要话题: {semantic_analysis.get("topic_analysis", {})}
+            情感分析: {semantic_analysis.get("emotion_analysis", {})}
+            时间轴分析: {timeline_analysis}
+
+            请返回JSON格式的综合分析：
+            {{
+                "audio_summary": "音频内容总体描述",
+                "main_topics": ["主要话题1", "主要话题2"],
+                "overall_emotion": "整体情感倾向",
+                "speech_quality": "语音质量评估",
+                "key_messages": ["关键信息1", "关键信息2"],
+                "audio_atmosphere": "音频氛围描述",
+                "content_structure": "内容结构分析"
+            }}
+            """
+            
+            response = await self.llm_service.generate_response(comprehensive_prompt, timeout=30)
+            
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                topic_analysis = semantic_analysis.get("topic_analysis", {})
+                emotion_analysis = semantic_analysis.get("emotion_analysis", {})
+                return {
+                    "audio_summary": "音频分析失败",
+                    "main_topics": topic_analysis.get("main_topics", [])[:3],
+                    "overall_emotion": emotion_analysis.get("overall_emotion", {}).get("dominant_emotion", "neutral"),
+                    "speech_quality": "unknown",
+                    "key_messages": [],
+                    "audio_atmosphere": "unknown",
+                    "content_structure": "无法分析"
+                }
+                
+        except Exception as e:
+            logger.error(f"音频综合分析失败: {e}")
+            return {"error": str(e)}
+
+    async def _integrate_multimodal_final(
+        self, 
+        visual_comprehensive: Dict[str, Any], 
+        audio_comprehensive: Dict[str, Any],
+        timeline_alignment: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        最终多模态整合 - 单次LLM调用整合所有信息
+        这是整个分析过程的最终整合步骤
+        """
+        try:
+            # 构建最终整合提示
+            final_prompt = f"""
+            请基于视觉和音频的综合分析，进行最终的多模态整合，返回JSON格式结果：
+
+            视觉分析结果: {visual_comprehensive}
+            音频分析结果: {audio_comprehensive}
+            时间轴对齐信息: {timeline_alignment.get("modality_coverage", {})}
+
+            请返回JSON格式的最终整合分析：
+            {{
+                "story_narrative": "完整的故事叙述",
+                "multimodal_coherence": 0.85,
+                "key_moments": [
+                    {{"timestamp": 0.0, "description": "关键时刻描述", "modalities": ["visual", "audio"]}}
+                ],
+                "overall_theme": "整体主题",
+                "emotional_arc": "情感变化轨迹",
+                "content_summary": "内容总结",
+                "production_insights": "制作见解",
+                "audience_appeal": "受众吸引力分析"
+            }}
+            """
+            
+            response = await self.llm_service.generate_response(final_prompt, timeout=40)
+            
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                return {
+                    "story_narrative": "多模态整合失败",
+                    "multimodal_coherence": 0.5,
+                    "key_moments": [],
+                    "overall_theme": visual_comprehensive.get("main_themes", ["unknown"])[0] if visual_comprehensive.get("main_themes") else "unknown",
+                    "emotional_arc": f"视觉: {visual_comprehensive.get('visual_emotion', 'unknown')}, 音频: {audio_comprehensive.get('overall_emotion', 'unknown')}",
+                    "content_summary": f"视觉: {visual_comprehensive.get('visual_summary', 'unknown')[:100]}; 音频: {audio_comprehensive.get('audio_summary', 'unknown')[:100]}",
+                    "production_insights": "分析失败",
+                    "audience_appeal": "无法评估"
+                }
+                
+        except Exception as e:
+            logger.error(f"最终多模态整合失败: {e}")
+            return {"error": str(e)}
     
     async def _align_timelines(
         self, 
@@ -607,7 +750,8 @@ class VideoMultimodalService:
             }}
             """
             
-            response = await self.llm_service.generate_response(correlation_prompt)
+            # 设置短超时时间，避免卡死
+            response = await self.llm_service.generate_response(correlation_prompt, timeout=15)
             
             try:
                 theme_correlation = json.loads(response)
@@ -668,7 +812,7 @@ class VideoMultimodalService:
             }}
             """
             
-            response = await self.llm_service.generate_response(emotion_prompt)
+            response = await self.llm_service.generate_response(emotion_prompt, timeout=15)
             
             try:
                 emotion_correlation = json.loads(response)
@@ -728,7 +872,7 @@ class VideoMultimodalService:
             }}
             """
             
-            response = await self.llm_service.generate_response(complementarity_prompt)
+            response = await self.llm_service.generate_response(complementarity_prompt, timeout=15)
             
             try:
                 complementarity = json.loads(response)

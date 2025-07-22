@@ -29,26 +29,48 @@ class MongoService:
         """
         递归清理数据以确保MongoDB兼容性：
         1. 转换numpy类型为Python原生类型
-        2. 确保字典键为字符串
-        3. 处理其他MongoDB不支持的类型
+        2. 确保字典键为字符串并移除NULL字节
+        3. 处理字符串中的NULL字节
+        4. 处理其他MongoDB不支持的类型
         """
         import numpy as np
         
         if isinstance(obj, np.integer):
             return int(obj)
         elif isinstance(obj, np.floating):
+            # 处理NaN和无穷大值
+            if np.isnan(obj) or np.isinf(obj):
+                return None
             return float(obj)
         elif isinstance(obj, np.bool_):
             return bool(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         elif isinstance(obj, dict):
-            # 确保所有字典键都是字符串，这对MongoDB很重要
-            return {str(key): MongoService._sanitize_for_mongodb(value) for key, value in obj.items()}
+            # 确保所有字典键都是字符串，移除NULL字节，这对MongoDB很重要
+            sanitized_dict = {}
+            for key, value in obj.items():
+                # 清理键名：转为字符串并移除NULL字节
+                clean_key = str(key).replace('\x00', '').replace('\0', '')
+                if not clean_key:  # 如果键为空，使用默认键
+                    clean_key = 'unknown_key'
+                sanitized_dict[clean_key] = MongoService._sanitize_for_mongodb(value)
+            return sanitized_dict
         elif isinstance(obj, list):
             return [MongoService._sanitize_for_mongodb(item) for item in obj]
-        else:
+        elif isinstance(obj, str):
+            # 移除字符串中的NULL字节
+            return obj.replace('\x00', '').replace('\0', '')
+        elif obj is None:
+            return None
+        elif isinstance(obj, (int, float, bool)):
             return obj
+        else:
+            # 对于其他类型，转换为字符串并清理NULL字节
+            try:
+                return str(obj).replace('\x00', '').replace('\0', '')
+            except:
+                return None
 
     @classmethod
     def save_text_analysis_results(cls, data_source_id: int, analysis_data: dict):

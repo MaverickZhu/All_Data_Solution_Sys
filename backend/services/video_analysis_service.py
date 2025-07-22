@@ -595,6 +595,63 @@ class VideoAnalysisService:
         )
         return result.scalar_one_or_none()
 
+    @classmethod
+    async def get_active_analysis_by_data_source(
+        cls,
+        db: AsyncSession,
+        data_source_id: int,
+        current_user: User
+    ) -> Optional[VideoAnalysis]:
+        """
+        获取指定数据源的活跃分析任务
+        包含用户权限验证，供API端点使用
+        """
+        # 验证数据源存在且用户有权限访问
+        await cls._validate_data_source_access(db, data_source_id, current_user)
+        
+        # 查找活跃的分析任务
+        result = await db.execute(
+            select(VideoAnalysis).where(
+                VideoAnalysis.data_source_id == data_source_id,
+                VideoAnalysis.status.in_([
+                    VideoAnalysisStatus.PENDING,
+                    VideoAnalysisStatus.IN_PROGRESS
+                ]),
+                VideoAnalysis.is_deleted == False
+            ).order_by(VideoAnalysis.created_at.desc())  # 最新的分析任务优先
+        )
+        return result.scalar_one_or_none()
+
+    @classmethod
+    async def get_latest_analysis_by_data_source(
+        cls,
+        db: AsyncSession,
+        data_source_id: int,
+        current_user: User
+    ) -> Optional[VideoAnalysis]:
+        """
+        获取指定数据源的最新视频分析记录
+        
+        Args:
+            db: 数据库会话
+            data_source_id: 数据源ID
+            current_user: 当前用户
+            
+        Returns:
+            最新的视频分析记录，如果不存在则返回None
+        """
+        # 验证数据源权限
+        data_source = await cls._validate_data_source_access(db, data_source_id, current_user)
+        
+        # 查找最新的视频分析记录
+        result = await db.execute(
+            select(VideoAnalysis).where(
+                VideoAnalysis.data_source_id == data_source_id,
+                VideoAnalysis.is_deleted == False
+            ).order_by(VideoAnalysis.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     # VideoFrame相关方法
     @staticmethod
     async def create_video_frame(

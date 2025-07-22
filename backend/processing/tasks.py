@@ -58,7 +58,39 @@ from backend.services.llm_service import LLMService # 引入LLMService
 
 from backend.services.audio_enhancement import AudioEnhancementService
 
+import os
+import json
+import logging
+import traceback
+from datetime import datetime
+from typing import Dict, List, Any, Optional, Union
+from pathlib import Path
+
+# 🔥 修复moviepy导入错误
+try:
+    from moviepy.editor import VideoFileClip  # type: ignore
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    # 如果moviepy不可用，提供fallback
+    MOVIEPY_AVAILABLE = False
+    VideoFileClip = None  # type: ignore
+    logging.warning("MoviePy not available, some video processing features may be limited")
+
+
 logger = logging.getLogger("ml")
+
+# 🔥 修复get_session_local未定义错误
+def get_session_local():
+    """创建同步数据库会话工厂"""
+    from backend.core.config import settings
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    
+    # 转换异步URL为同步URL
+    sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    engine = create_engine(sync_url)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return SessionLocal
 
 # Ensure NLTK data is downloaded
 try:
@@ -935,19 +967,22 @@ def perform_video_analysis(video_path: Path) -> dict:
                 
                 # Try to get additional metadata with moviepy (fallback)
                 try:
-                    from moviepy.editor import VideoFileClip
-                    with VideoFileClip(str(video_path)) as clip:
-                        if not video_info.get("duration_seconds"):
-                            video_info["duration_seconds"] = clip.duration
-                        if not video_info.get("fps"):
-                            video_info["fps"] = clip.fps
-                        
-                        # Additional moviepy-specific info
-                        video_info["has_audio"] = clip.audio is not None
-                        if clip.audio:
-                            video_info["audio_duration"] = clip.audio.duration
-                        
-                        logger.info(f"Enhanced video info with moviepy: duration={clip.duration:.2f}s, has_audio={clip.audio is not None}")
+                    if MOVIEPY_AVAILABLE:
+                        with VideoFileClip(str(video_path)) as clip:
+                            if not video_info.get("duration_seconds"):
+                                video_info["duration_seconds"] = clip.duration
+                            if not video_info.get("fps"):
+                                video_info["fps"] = clip.fps
+                            
+                            # Additional moviepy-specific info
+                            video_info["has_audio"] = clip.audio is not None
+                            if clip.audio:
+                                video_info["audio_duration"] = clip.audio.duration
+                            
+                            logger.info(f"Enhanced video info with moviepy: duration={clip.duration:.2f}s, has_audio={clip.audio is not None}")
+                            
+                    else:
+                        logger.warning("MoviePy is not available, skipping enhanced video info with moviepy.")
                         
                 except Exception as e:
                     logger.warning(f"MoviePy enhancement failed (using OpenCV data): {e}")
@@ -959,18 +994,20 @@ def perform_video_analysis(video_path: Path) -> dict:
             logger.warning(f"Could not extract video properties from {video_path}: {e}")
             # Try moviepy as fallback
             try:
-                from moviepy.editor import VideoFileClip
-                with VideoFileClip(str(video_path)) as clip:
-                    video_info = {
-                        "width": clip.w,
-                        "height": clip.h,
-                        "fps": clip.fps,
-                        "duration_seconds": clip.duration,
-                        "resolution": f"{clip.w}x{clip.h}",
-                        "aspect_ratio": round(clip.w / clip.h, 2) if clip.h > 0 else 0,
-                        "has_audio": clip.audio is not None
-                    }
-                    logger.info(f"Fallback to moviepy successful: {video_info}")
+                if MOVIEPY_AVAILABLE:
+                    with VideoFileClip(str(video_path)) as clip:
+                        video_info = {
+                            "width": clip.w,
+                            "height": clip.h,
+                            "fps": clip.fps,
+                            "duration_seconds": clip.duration,
+                            "resolution": f"{clip.w}x{clip.h}",
+                            "aspect_ratio": round(clip.w / clip.h, 2) if clip.h > 0 else 0,
+                            "has_audio": clip.audio is not None
+                        }
+                        logger.info(f"Fallback to moviepy successful: {video_info}")
+                else:
+                    logger.warning("MoviePy is not available, skipping fallback to moviepy.")
             except Exception as fallback_e:
                 logger.error(f"Both OpenCV and moviepy failed: {fallback_e}")
                 video_info = {
@@ -1246,12 +1283,14 @@ def run_profiling_task(self, data_source_id: int):
     autoretry_for=(),  # 不自动重试任何错误，手动控制重试逻辑
     retry_backoff=True,
     retry_jitter=True,
-    retry_kwargs={'max_retries': 2}  # 减少重试次数
+    retry_kwargs={'max_retries': 0},  # 🔥 禁用自动重试，防止重复执行
+    acks_late=True,  # 任务完成后才确认，避免中断导致重投递
+    reject_on_worker_lost=False,  # worker丢失时不重新投递
+    task_ignore_result=False,  # 保留结果用于幂等性检查
 )
 def run_video_deep_analysis_task(self, video_analysis_id: int):
     """
-    视频深度分析Celery任务
-    执行完整的多模态视频语义分析
+    运行视频深度分析任务（GPU加速版本）
     """
     logger.info(f"Starting video deep analysis task for video_analysis_id: {video_analysis_id}")
     db = next(get_sync_db())
@@ -1418,7 +1457,93 @@ def run_video_deep_analysis_task(self, video_analysis_id: int):
         
         # 保存完整结果到MongoDB
         mongo_service.save_video_deep_analysis_results(video_analysis_id, analysis_result)
-        
+
+        # 🔥 新增：将关键结果同步到PostgreSQL
+        try:
+            # 从分析结果中提取关键信息用于PostgreSQL
+            final_integration = analysis_result.get("multimodal_fusion", {}).get("final_integration", {})
+            visual_analysis = analysis_result.get("visual_analysis", {})
+            audio_analysis = analysis_result.get("audio_analysis", {})
+            scene_detection = analysis_result.get("scene_detection", {})
+            
+            # 更新PostgreSQL中的video_analyses表关键字段
+            comprehensive_summary = final_integration.get("story_narrative", "分析完成")
+            if comprehensive_summary and comprehensive_summary != "多模态整合失败":
+                video_analysis.comprehensive_summary = comprehensive_summary[:2000]  # 限制长度
+            else:
+                video_analysis.comprehensive_summary = "视频深度分析已完成，包含场景分析、语音识别和多模态融合。"
+            
+            # 处理content_tags - 从key_moments提取
+            key_moments_data = final_integration.get("key_moments", [])
+            if isinstance(key_moments_data, list) and key_moments_data:
+                video_analysis.content_tags = key_moments_data[:20]  # 限制数量
+            else:
+                video_analysis.content_tags = ["视频分析", "场景检测", "语音识别", "多模态融合"]
+            
+            # 构建故事片段数据
+            story_segments = []
+            temporal_segments = analysis_result.get("multimodal_fusion", {}).get("timeline_alignment", {}).get("temporal_segments", [])
+            for i, segment in enumerate(temporal_segments[:10]):  # 限制数量
+                story_segments.append({
+                    "start_time": segment.get("start_time", 0),
+                    "end_time": segment.get("end_time", 0),
+                    "content": segment.get("audio_content", "")[:500],  # 限制长度
+                    "visual_objects": segment.get("detected_objects", [])[:5],
+                    "segment_type": segment.get("segment_type", "mixed")
+                })
+            video_analysis.story_segments = story_segments if story_segments else []
+            
+            # 构建关键时刻数据
+            key_moments = []
+            sync_events = analysis_result.get("multimodal_fusion", {}).get("timeline_alignment", {}).get("sync_events", [])
+            for event in sync_events[:10]:  # 限制数量
+                key_moments.append({
+                    "timestamp": event.get("timestamp", 0),
+                    "event_type": event.get("sync_type", "unknown"),
+                    "description": f"同步事件: {event.get('sync_type', 'N/A')}",
+                    "confidence": event.get("sync_confidence", 0.5)
+                })
+            video_analysis.key_moments = key_moments if key_moments else []
+            
+            # 更新分析统计
+            video_analysis.scene_count = scene_detection.get("total_scenes", 0) or len(scene_detection.get("scene_sequences", []))
+            
+            # 处理key_frames
+            frame_numbers = [frame.get("frame_number") for frame in visual_analysis.get("frame_analyses", []) if frame.get("frame_number") is not None]
+            video_analysis.key_frames = frame_numbers[:20] if frame_numbers else []
+            
+            # 处理visual_themes和visual_objects
+            video_analysis.visual_themes = visual_analysis.get("visual_themes", [])[:10] if visual_analysis.get("visual_themes") else []
+            video_analysis.visual_objects = visual_analysis.get("detected_objects", [])[:20] if visual_analysis.get("detected_objects") else []
+            
+            # 处理speech_segments
+            speech_segments = []
+            enhanced_recognition = audio_analysis.get("enhanced_recognition", {})
+            if enhanced_recognition and enhanced_recognition.get("speech_segments"):
+                for seg in enhanced_recognition.get("speech_segments", [])[:15]:
+                    speech_segments.append({
+                        "start_time": seg.get("start_time", 0),
+                        "end_time": seg.get("end_time", 0), 
+                        "text": seg.get("text", "")[:200],
+                        "confidence": seg.get("confidence", 0)
+                    })
+            video_analysis.speech_segments = speech_segments
+            
+            # 更新处理元数据
+            video_analysis.processing_time = analysis_result.get("analysis_metadata", {}).get("total_processing_time", 0)
+            video_analysis.model_versions = {
+                "vision": "qwen2.5vl:7b",
+                "audio": "whisper-large-v3", 
+                "llm": "deepseek-r1:8b"
+            }
+            
+            logger.info(f"Successfully synchronized video deep analysis results to PostgreSQL for video_analysis_id: {video_analysis_id}")
+            logger.info(f"Synced data: scene_count={video_analysis.scene_count}, key_frames_count={len(video_analysis.key_frames)}, visual_themes_count={len(video_analysis.visual_themes)}, speech_segments_count={len(video_analysis.speech_segments)}")
+            
+        except Exception as sync_error:
+            logger.error(f"Failed to synchronize results to PostgreSQL for video_analysis_id {video_analysis_id}: {sync_error}", exc_info=True)
+            # 继续执行，不因同步失败而中断整个任务
+
         # 提交数据库更改
         db.commit()
         

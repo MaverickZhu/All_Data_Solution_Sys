@@ -54,8 +54,39 @@ class WhisperService:
             start_time = time.time()
             
             try:
-                # 优先使用Large V3模型，提供最佳质量（可通过环境变量配置）
-                model_name = os.getenv("WHISPER_MODEL", "large-v3")  # 默认使用large-v3
+                # 检查预装模型，优先使用已缓存的模型
+                cache_dir = Path("/root/.cache/whisper")
+                available_models = []
+                
+                if cache_dir.exists():
+                    # 检查已缓存的模型
+                    model_files = list(cache_dir.glob("*.pt"))
+                    logger.info(f"🔍 扫描缓存目录发现的模型文件: {[f.name for f in model_files]}")
+                    
+                    for model_file in model_files:
+                        if model_file.name == "large-v3.pt":
+                            available_models.append("large-v3")
+                        elif model_file.name == "large-v3-turbo.pt":
+                            # Whisper的turbo模型实际对应turbo名称
+                            available_models.append("turbo")
+                        elif model_file.name == "base.pt":
+                            available_models.append("base")
+                    
+                    logger.info(f"🎯 发现预装模型: {available_models}")
+                
+                # 选择最佳可用模型
+                if "large-v3" in available_models:
+                    model_name = "large-v3"
+                elif "turbo" in available_models:
+                    model_name = "turbo"
+                elif "base" in available_models:
+                    model_name = "base"
+                else:
+                    # 如果没有预装模型，使用环境变量或默认值
+                    model_name = os.getenv("WHISPER_MODEL", "large-v3")
+                    logger.warning(f"⚠️ 未发现预装模型，将下载: {model_name}")
+                
+                logger.info(f"🚀 选择Whisper模型: {model_name}")
                 
                 if self.device == "cuda":
                     # GPU模式：加载模型到GPU，让Whisper自己处理精度

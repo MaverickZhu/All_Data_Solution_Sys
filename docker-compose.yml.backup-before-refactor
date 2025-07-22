@@ -1,0 +1,278 @@
+services:
+  # --- 开发环境核心服务 ---
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    container_name: multimodal_postgres
+    ports:
+      - "19433:5432"
+    environment:
+      POSTGRES_DB: multimodal_analysis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./backend/data/postgres_data:/var/lib/postgresql/data
+    networks:
+      - multimodal_network
+
+  multimodal_redis:
+    image: redis:latest
+    container_name: multimodal_redis
+    ports:
+      - "6380:6379"
+    command: redis-server --requirepass multimodal123
+    networks:
+      - multimodal_network
+
+  mongodb:
+    image: mongo:6.0
+    container_name: multimodal_mongo
+    ports:
+      - "27018:27017"
+    volumes:
+      - ./backend/data/mongo_data:/data/db
+    networks:
+      - multimodal_network
+
+  # --- 应用后端与 Celery Worker ---
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "uvicorn backend.main:app --host 0.0.0.0 --port 8088 --reload"
+    working_dir: /app
+    volumes:
+      - .:/app
+      - uploads_data:/app/uploads
+      - ./logs:/app/logs
+    ports:
+      - "8088:8088"
+    depends_on:
+      postgres:
+        condition: service_started
+      multimodal_redis:
+        condition: service_started
+      mongodb:
+        condition: service_started
+      milvus-standalone:
+        condition: service_healthy
+    networks:
+      - multimodal_network
+    environment: &app-env
+      APP_ENV: docker
+      # Base Postgres variables for Pydantic Settings
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "multimodal_analysis"
+      # Explicitly provide the sync URL to avoid Pydantic validation order issues
+      SYNC_DATABASE_URL: "postgresql+psycopg2://postgres:password@postgres:5432/multimodal_analysis"
+      # Other service URLs
+      MONGODB_URL: "mongodb://mongodb:27017"
+      REDIS_URL: "redis://:multimodal123@multimodal_redis:6379/0"
+      CELERY_BROKER_URL: "amqp://admin:admin123@multimodal_rabbitmq:5672"
+      CELERY_RESULT_BACKEND: "redis://:multimodal123@multimodal_redis:6379/2"
+      SECRET_KEY: "a-very-secret-key-for-this-app"
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3080","http://127.0.0.1:3080"]'
+      UPLOAD_DIR: "/app/uploads"
+      NEO4J_URI: "bolt://neo4j:7687"
+      MILVUS_HOST: "milvus-standalone"
+      MILVUS_PORT: "19530"
+      APP_PORT: 8088
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "celery -A backend.core.celery_app:celery_app worker -l info"
+    working_dir: /app
+    volumes:
+      - .:/app
+      - uploads_data:/app/uploads
+    depends_on:
+      backend:
+        condition: service_started
+      milvus-standalone:
+        condition: service_healthy
+    runtime: nvidia
+    environment:
+      <<: *app-env # Inherit all shared environment variables
+      # Override or add specific variables for the worker if needed
+      # By explicitly providing all DB variables, we ensure Pydantic can build the settings object
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "multimodal_analysis"
+      SYNC_DATABASE_URL: "postgresql+psycopg2://postgres:password@postgres:5432/multimodal_analysis"
+      # GPU support environment variables
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: on-failure
+    networks:
+      - multimodal_network
+
+  # --- 生产级基础设施 (可选，可注释掉) ---
+  neo4j:
+    image: neo4j:5.15
+    container_name: multimodal_neo4j
+    ports:
+      - "17474:7474"
+      - "17687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password123
+    volumes:
+      - neo4j_prod_data:/data
+    networks:
+      - multimodal_network
+
+  multimodal_rabbitmq:
+    image: rabbitmq:3-management
+    container_name: multimodal_rabbitmq
+    ports:
+      - "25672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - multimodal_network
+  
+  minio:
+    image: minio/minio:latest
+    container_name: multimodal_minio
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    entrypoint: /bin/sh
+    command: -c 'mkdir -p /data/milvus-bucket && /usr/bin/minio server /data --console-address ":9001"'
+    networks:
+      - multimodal_network
+
+  # --- Milvus Vector Database ---
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: multimodal_etcd
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - multimodal_network
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.4.9
+    container_name: multimodal_milvus
+    ports:
+      - "19531:19530"
+      - "9009:9091"
+    depends_on:
+      etcd:
+        condition: service_started
+      minio:
+        condition: service_started
+    environment:
+      ETCD_ENDPOINTS: "etcd:2379"
+      MINIO_ADDRESS: "minio:9000"
+      MINIO_ACCESS_KEY_ID: "minioadmin"
+      MINIO_SECRET_ACCESS_KEY: "minioadmin123"
+      ETCD_USE_EMBED: "false"
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: "milvus-bucket"
+    volumes:
+      - milvus_data:/milvus/data
+    command: ["milvus", "run", "standalone"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 90s
+    networks:
+      - multimodal_network
+
+  # --- 监控与日志 (可选) ---
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+  #   container_name: multimodal_elasticsearch
+  #   environment:
+  #     - discovery.type=single-node
+  #     - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+  #     - xpack.security.enabled=false
+  #   ports:
+  #     - "9201:9200"
+  #   volumes:
+  #     - elasticsearch_data:/usr/share/elasticsearch/data
+  #   networks:
+  #     - multimodal_network
+
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.11.3
+  #   container_name: multimodal_kibana
+  #   ports:
+  #     - "5601:5601"
+  #   environment:
+  #     ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
+  #   depends_on:
+  #     - elasticsearch
+  #   networks:
+  #     - multimodal_network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: multimodal_prometheus
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    networks:
+      - multimodal_network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: multimodal_grafana
+    ports:
+      - "13001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - multimodal_network
+
+networks:
+  multimodal_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  minio_data:
+  uploads_data:
+  neo4j_prod_data:
+  # elasticsearch_data:
+  prometheus_data:
+  grafana_data:
+  etcd_data:
+  milvus_data:
